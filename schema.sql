@@ -80,3 +80,48 @@ CREATE TABLE IF NOT EXISTS importacoes (
     registros_com_erro INTEGER DEFAULT 0,
     status_importacao TEXT
 );
+
+-- 9. Versões completas do One Page (histórico global e compartilhado)
+CREATE TABLE IF NOT EXISTS versoes_contrato (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    contrato TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    periodo TEXT,
+    dados JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_versoes_contrato_data
+    ON versoes_contrato (contrato, created_at DESC);
+
+ALTER TABLE versoes_contrato ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'versoes_contrato'
+          AND policyname = 'Leitura global de versões'
+    ) THEN
+        CREATE POLICY "Leitura global de versões"
+            ON versoes_contrato FOR SELECT
+            TO anon, authenticated
+            USING (true);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'versoes_contrato'
+          AND policyname = 'Criação global de versões'
+    ) THEN
+        CREATE POLICY "Criação global de versões"
+            ON versoes_contrato FOR INSERT
+            TO anon, authenticated
+            WITH CHECK (true);
+    END IF;
+END
+$$;
+
+GRANT SELECT, INSERT ON versoes_contrato TO anon, authenticated;

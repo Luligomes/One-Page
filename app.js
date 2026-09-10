@@ -322,7 +322,12 @@ function selecionarSlide(index) {
 }
 
 function salvarDados() {
-    localStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+    try {
+        localStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+    } catch (error) {
+        // O cache local nunca pode invalidar um salvamento confirmado no Supabase.
+        console.warn("Não foi possível atualizar o cache local:", error);
+    }
 }
 
 function carregarDados() {
@@ -524,8 +529,16 @@ function configurarEventosGerais() {
     }
 
     if (typeof btnSave !== 'undefined' && btnSave) {
-        btnSave.addEventListener("click", () => {
-            salvarNovaVersao();
+        btnSave.addEventListener("click", async () => {
+            btnSave.disabled = true;
+            const textoAnterior = btnSave.textContent;
+            btnSave.textContent = "Salvando versão...";
+            try {
+                await salvarNovaVersao();
+            } finally {
+                btnSave.disabled = false;
+                btnSave.textContent = textoAnterior;
+            }
         });
     }
 
@@ -648,18 +661,41 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-// slot versions
-function atualizarDropdownVersoes() {
+// O Supabase é a fonte oficial do histórico; o AppState mantém somente um cache.
+let requisicaoVersoesAtual = 0;
+
+async function atualizarDropdownVersoes() {
     if (!selectVersionsContract) return;
-    
+
+    const numeroRequisicao = ++requisicaoVersoesAtual;
     const valAnterior = selectVersionsContract.value;
     selectVersionsContract.innerHTML = '<option value="">Últimas versões por contrato</option>';
-    
     const contratoAtivo = filterContrato.value;
-    AppState.historicoVersoes = AppState.historicoVersoes || [];
-    
-    const versoesFiltradas = AppState.historicoVersoes.filter(v => v.contrato === contratoAtivo);
-    
+    if (!contratoAtivo) return;
+
+    let versoesFiltradas = [];
+    try {
+        if (typeof window.listarVersoesContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        versoesFiltradas = await window.listarVersoesContratoSupabase(contratoAtivo);
+        if (numeroRequisicao !== requisicaoVersoesAtual || filterContrato.value !== contratoAtivo) return;
+
+        const outrosContratos = (AppState.historicoVersoes || [])
+            .filter(versao => versao.contrato !== contratoAtivo);
+        AppState.historicoVersoes = [...outrosContratos, ...versoesFiltradas];
+        salvarDados();
+    } catch (error) {
+        console.error("Erro ao carregar versões do Supabase:", error);
+        if (numeroRequisicao !== requisicaoVersoesAtual) return;
+        const optionErro = document.createElement("option");
+        optionErro.value = "";
+        optionErro.textContent = "Não foi possível carregar as versões";
+        optionErro.disabled = true;
+        selectVersionsContract.appendChild(optionErro);
+        return;
+    }
+
     versoesFiltradas.forEach(v => {
         const opt = document.createElement("option");
         opt.value = v.id;
@@ -673,7 +709,7 @@ function atualizarDropdownVersoes() {
 }
 
 // Salva uma nova versão acumulativa do dashboard atual
-function salvarNovaVersao() {
+async function salvarNovaVersao() {
     if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
     }
@@ -683,14 +719,6 @@ function salvarNovaVersao() {
     if (nomeVersaoInput === null) return;
     
     const nomeVersao = nomeVersaoInput.trim() || defaultName;
-    
-    const agora = new Date();
-    const dia = String(agora.getDate()).padStart(2, '0');
-    const mes = String(agora.getMonth() + 1).padStart(2, '0');
-    const ano = agora.getFullYear();
-    const horas = String(agora.getHours()).padStart(2, '0');
-    const minutos = String(agora.getMinutes()).padStart(2, '0');
-    const dataHora = `${dia}/${mes}/${ano} | ${horas}:${minutos}`;
     
     const snapshot = {
         contrato: AppState.contrato,
@@ -713,22 +741,33 @@ function salvarNovaVersao() {
         anoAtual: AppState.anoAtual
     };
     
-    AppState.historicoVersoes = AppState.historicoVersoes || [];
-    
-    const novaVersao = {
-        id: "ver-" + Date.now(),
+    const versaoParaSalvar = {
         nome: nomeVersao,
         contrato: AppState.contrato,
-        dataHora: dataHora,
+        periodo: AppState.periodo,
         dados: snapshot
     };
-    
-    AppState.historicoVersoes.push(novaVersao);
-    
-    salvarDados();
-    atualizarDropdownVersoes();
-    selectVersionsContract.value = novaVersao.id;
-    mostrarNotificacao(`Versão "${nomeVersao}" salva com sucesso no histórico!`, "success");
+
+    try {
+        if (typeof window.salvarVersaoContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        const novaVersao = await window.salvarVersaoContratoSupabase(versaoParaSalvar);
+        AppState.historicoVersoes = AppState.historicoVersoes || [];
+        AppState.historicoVersoes = [
+            ...AppState.historicoVersoes.filter(versao => versao.id !== novaVersao.id),
+            novaVersao
+        ];
+        salvarDados();
+        await atualizarDropdownVersoes();
+        selectVersionsContract.value = novaVersao.id;
+        mostrarNotificacao(`Versão "${nomeVersao}" salva com sucesso no Supabase!`, "success");
+        return novaVersao;
+    } catch (error) {
+        console.error("Erro ao salvar versão no Supabase:", error);
+        alert(error.message);
+        return null;
+    }
 }
 
 

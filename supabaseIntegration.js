@@ -69,6 +69,59 @@ function obterUltimaCompetenciaImportada(records) {
 let pendingImportPayload = [];
 let pendingImportSummary = {};
 
+function normalizarVersaoSupabase(row) {
+    const criadaEm = row.created_at ? new Date(row.created_at) : new Date();
+    const data = criadaEm.toLocaleDateString('pt-BR');
+    const hora = criadaEm.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return {
+        id: row.id,
+        nome: row.nome,
+        contrato: row.contrato,
+        periodo: row.periodo,
+        dataHora: `${data} | ${hora}`,
+        createdAt: row.created_at,
+        dados: row.dados
+    };
+}
+
+window.listarVersoesContratoSupabase = async function(contrato) {
+    if (!window.supabaseClientObj) {
+        throw new Error('Supabase não está configurado nesta publicação.');
+    }
+    if (!contrato) return [];
+
+    const { data, error } = await window.supabaseClientObj
+        .from('versoes_contrato')
+        .select('id, contrato, nome, periodo, dados, created_at')
+        .eq('contrato', contrato)
+        .order('created_at', { ascending: false });
+
+    if (error) throw new Error(`Não foi possível consultar as versões no Supabase: ${error.message}`);
+    return (data || []).map(normalizarVersaoSupabase);
+};
+
+window.salvarVersaoContratoSupabase = async function(versao) {
+    if (!window.supabaseClientObj) {
+        throw new Error('Supabase não está configurado nesta publicação.');
+    }
+
+    const payload = {
+        contrato: versao.contrato,
+        nome: versao.nome,
+        periodo: versao.periodo || null,
+        dados: versao.dados
+    };
+
+    const { data, error } = await window.supabaseClientObj
+        .from('versoes_contrato')
+        .insert(payload)
+        .select('id, contrato, nome, periodo, dados, created_at')
+        .single();
+
+    if (error) throw new Error(`Não foi possível salvar a versão no Supabase: ${error.message}`);
+    return normalizarVersaoSupabase(data);
+};
+
 async function validateAndPreviewExcel(matrix) {
     if (!matrix || matrix.length < 2) {
         alert("O arquivo não possui dados suficientes.");
