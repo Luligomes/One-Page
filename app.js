@@ -1011,8 +1011,9 @@ function sincronizarMetadadosIndicador(ind) {
     let found = false;
     AppState.excelData.forEach(row => {
         const matchContrato = row.contrato === ind.contrato;
-        const matchLocalidade = ind.localidade === "todos" || row.localidade === ind.localidade;
-        if (matchContrato && matchLocalidade) {
+        const matchLocalidade = ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade;
+        const matchIndicador = row.indicador === ind.indicador;
+        if (matchContrato && matchLocalidade && matchIndicador) {
             row.meta = ind.meta;
             row.formula = ind.formula;
             row.comment = ind.comment;
@@ -1046,20 +1047,27 @@ function sincronizarValoresGrafico(ind) {
     
     // As referências são capturadas no momento em que o gráfico é montado.
     // Assim, editar um slide nunca alcança linhas pertencentes a outro indicador.
+    const scopeContrato = ind.scopeContrato && ind.scopeContrato !== "todos"
+        ? ind.scopeContrato
+        : ind.contrato;
+    const scopeLocalidade = ind.scopeLocalidade || ind.localidade || "todos";
+    const pertenceAoGrafico = row =>
+        row.indicador === ind.indicador &&
+        row.contrato === scopeContrato &&
+        (scopeLocalidade === "todos" || row.localidade === scopeLocalidade);
+
     const sourceRows = Array.isArray(ind.sourceRows)
-        ? ind.sourceRows.filter(row => AppState.excelData.includes(row) && row.indicador === ind.indicador)
+        ? ind.sourceRows.filter(row => AppState.excelData.includes(row) && pertenceAoGrafico(row))
         : AppState.excelData.filter(row =>
-            row.indicador === ind.indicador &&
-            (ind.scopeContrato === "todos" || row.contrato === ind.scopeContrato) &&
-            (ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade)
+            pertenceAoGrafico(row)
         );
 
-    const fallbackIdx = AppState.indicadores.findIndex(item =>
-        (item.indicador || item.title) === ind.indicador
-    );
-    if (fallbackIdx !== -1 && AppState.indicadores[fallbackIdx]) {
-        AppState.indicadores[fallbackIdx].acum2025 = ind.acumAnterior;
-    }
+    // O acumulado anterior editado pertence somente a este gráfico. Guardá-lo
+    // no fallback global por nome fazia contratos diferentes compartilharem o
+    // mesmo valor.
+    sourceRows.forEach(row => {
+        row.acumAnteriorOverride = ind.acumAnterior;
+    });
 
     const templateRow = sourceRows[0] || null;
     
@@ -1090,7 +1098,9 @@ function sincronizarValoresGrafico(ind) {
     salvarDados();
 }
 
-// Filtra e retorna todos os indicadores da planilha Excel dinamicamente por referência direta, consolidando por nome de Indicador
+// Filtra e retorna os indicadores da planilha por referência direta. Quando
+// "todos" os contratos estão selecionados, cada contrato mantém seu próprio
+// gráfico mesmo que possua um indicador com o mesmo nome.
 function obterDadosFiltrados() {
     const contratoSel = filterContrato.value;
     const localidadeSel = filterLocalidade.value;
@@ -1103,20 +1113,23 @@ function obterDadosFiltrados() {
             return matchContrato && matchLocalidade;
         });
         
-        // Agrupa os registros unicamente pelo nome do Indicador
+        // A identidade do gráfico é contrato + indicador. Localidades continuam
+        // consolidadas quando o filtro de localidade estiver em "todos".
         const grouped = {};
         
         filteredRaw.forEach(row => {
             const indName = row.indicador;
-            if (!grouped[indName]) {
+            const rowContrato = String(row.contrato || "").trim();
+            const groupKey = `${rowContrato}\u0000${indName}`;
+            if (!grouped[groupKey]) {
                 const nameLower = indName.toLowerCase();
                 let isPct = !nameLower.includes("acidente") && !nameLower.includes("cpt") && !nameLower.includes("spt");
                 
-                grouped[indName] = {
-                    id: indName.toLowerCase().replace(/[^a-z0-9]/g, ""),
-                    contrato: contratoSel === "todos" ? AppState.contrato : contratoSel,
+                grouped[groupKey] = {
+                    id: `${rowContrato}-${indName}`.toLowerCase().replace(/[^a-z0-9]/g, ""),
+                    contrato: rowContrato,
                     localidade: localidadeSel,
-                    scopeContrato: contratoSel,
+                    scopeContrato: rowContrato,
                     scopeLocalidade: localidadeSel,
                     indicador: indName,
                     pilar: row.pilar,
@@ -1141,12 +1154,12 @@ function obterDadosFiltrados() {
                 };
             }
 
-            grouped[indName].sourceRows.push(row);
+            grouped[groupKey].sourceRows.push(row);
             
-            const isPct = grouped[indName].isPercentage;
+            const isPct = grouped[groupKey].isPercentage;
             const valBase = parseValorDadosBase(row.dadosBase, isPct);
             if (valBase !== null) {
-                grouped[indName].monthlyRawValues[row.mesIdx].push(valBase);
+                grouped[groupKey].monthlyRawValues[row.mesIdx].push(valBase);
             }
             
             let metaNum = parseFloat(String(row.meta).replace("%", "").replace(",", ".").trim());
@@ -1154,7 +1167,7 @@ function obterDadosFiltrados() {
                 if (isPct && metaNum >= 0 && metaNum <= 1.5) {
                     metaNum = metaNum * 100;
                 }
-                grouped[indName].monthlyRawMetas[row.mesIdx].push(metaNum);
+                grouped[groupKey].monthlyRawMetas[row.mesIdx].push(metaNum);
             }
         });
         
@@ -1206,13 +1219,18 @@ function obterDadosFiltrados() {
             ind.meta = metaRep;
             
                         // Recupera acumulado anterior correspondente a partir da planilha de ano anterior
-            let oldAcum = null;
+            const sourceWithOverride = ind.sourceRows.find(row =>
+                Object.prototype.hasOwnProperty.call(row, "acumAnteriorOverride")
+            );
+            let oldAcum = sourceWithOverride
+                ? sourceWithOverride.acumAnteriorOverride
+                : null;
             if (AppState.excelDataAnterior && AppState.excelDataAnterior.length > 0) {
-                const prevRows = AppState.excelDataAnterior.filter(row => {
-                    const matchContrato = contratoSel === "todos" || row.contrato === ind.contrato;
-                    const matchLocalidade = localidadeSel === "todos" || row.localidade === ind.localidade;
+                const prevRows = oldAcum === null ? AppState.excelDataAnterior.filter(row => {
+                    const matchContrato = row.contrato === ind.scopeContrato;
+                    const matchLocalidade = ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade;
                     return matchContrato && matchLocalidade && row.indicador === ind.indicador;
-                });
+                }) : [];
                 
                 const prevVals = [];
                 prevRows.forEach(row => {
