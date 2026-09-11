@@ -2516,6 +2516,19 @@ function exportarPDFLegado() {
 async function criarOnePageParaExportacao(slideOriginal) {
     // Captura o próprio componente já renderizado fora do modo de edição.
     // Não há clone nem CSS alternativo para o One Page.
+    // O texto padrão da próxima reunião é apenas uma orientação de edição e
+    // não deve aparecer no arquivo quando nenhuma data foi informada.
+    const proxReuniao = slideOriginal.querySelector("#txt-prox-reuniao");
+    const proxReuniaoHtmlOriginal = proxReuniao ? proxReuniao.innerHTML : null;
+    const proxReuniaoTexto = proxReuniao ? proxReuniao.textContent.trim() : "";
+    const ocultarPlaceholderProximaReuniao = proxReuniao && (
+        proxReuniaoTexto === "" || /^dd\s*\/\s*mm\s*\/\s*(?:aa|aaaa)$/i.test(proxReuniaoTexto)
+    );
+
+    if (ocultarPlaceholderProximaReuniao) {
+        proxReuniao.innerHTML = "";
+    }
+
     // A rotina responsiva existente precisa rodar com o slide visível;
     // quando executada com ele oculto, a altura medida é zero.
     if (typeof autoFitCompact === "function") autoFitCompact();
@@ -2525,7 +2538,11 @@ async function criarOnePageParaExportacao(slideOriginal) {
     return {
         element: slideOriginal,
         height: 720,
-        cleanup() {}
+        cleanup() {
+            if (ocultarPlaceholderProximaReuniao && proxReuniaoHtmlOriginal !== null) {
+                proxReuniao.innerHTML = proxReuniaoHtmlOriginal;
+            }
+        }
     };
 }
 
