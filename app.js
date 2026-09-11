@@ -449,6 +449,21 @@ function renderizarDadosGlobais() {
     if (typeof renderKanbanCards === 'function') renderKanbanCards();
 }
 
+// Mantém os metadados editáveis do rodapé do One Page sincronizados com o
+// estado. Sem essa sincronização, qualquer nova renderização (inclusive a
+// iniciada pela exportação) restaura os textos padrão "Nome" e "dd/mm/aaaa".
+function sincronizarMetadadosOnePageDoDOM() {
+    [
+        ["txt-resp-mro", "respMro", "Nome"],
+        ["txt-resp-cliente", "respCliente", "Nome"],
+        ["txt-prox-reuniao", "proxReuniao", "dd/mm/aaaa"]
+    ].forEach(([elementId, stateKey, fallback]) => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        AppState[stateKey] = element.textContent.trim() || fallback;
+    });
+}
+
 function configurarEventosGerais() {
     const capaPeriodo = document.getElementById("slide1-periodo-text");
     if (capaPeriodo) {
@@ -459,6 +474,20 @@ function configurarEventosGerais() {
             salvarDados();
         });
     }
+
+    ["txt-resp-mro", "txt-resp-cliente", "txt-prox-reuniao"].forEach(elementId => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+
+        // O evento input protege o valor mesmo se outra ação renderizar o One
+        // Page antes de o campo perder o foco.
+        element.addEventListener("input", sincronizarMetadadosOnePageDoDOM);
+        element.addEventListener("blur", () => {
+            sincronizarMetadadosOnePageDoDOM();
+            salvarDados();
+            if (typeof updatePlaceholderColors === "function") updatePlaceholderColors();
+        });
+    });
 
     if (btnExportPdf) {
         btnExportPdf.addEventListener("click", exportarPDF);
@@ -713,6 +742,7 @@ async function salvarNovaVersao() {
     if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
     }
+    sincronizarMetadadosOnePageDoDOM();
     
     const defaultName = AppState.contrato || "Versão Sem Nome";
     const nomeVersaoInput = prompt("Digite o nome ou identificador para esta versão:", defaultName);
@@ -2490,6 +2520,8 @@ async function exportarPDF() {
     const slideAnterior = activeSlideIndex;
     const modoAnterior = modoEdicao;
 
+    sincronizarMetadadosOnePageDoDOM();
+
     if (!window.jspdf || typeof html2canvas === "undefined") {
         alert("Não foi possível carregar as bibliotecas de exportação. Atualize a página e tente novamente.");
         return;
@@ -2594,6 +2626,8 @@ async function exportarPPTXPadrao() {
     const slideAnterior = activeSlideIndex;
     const modoAnterior = modoEdicao;
 
+    sincronizarMetadadosOnePageDoDOM();
+
     if (typeof PptxGenJS === "undefined" || typeof html2canvas === "undefined") {
         alert("Não foi possível carregar as bibliotecas de exportação. Atualize a página e tente novamente.");
         return;
@@ -2695,6 +2729,8 @@ async function exportarPPTXEditavel() {
     const titleText = document.getElementById("export-title-text");
     const progressFill = document.getElementById("export-progress-fill");
     const modoAnterior = modoEdicao;
+
+    sincronizarMetadadosOnePageDoDOM();
     
     exportOverlay.style.display = "flex";
     if (titleText) titleText.textContent = "Gerando PPTX Editável Perfeito...";
