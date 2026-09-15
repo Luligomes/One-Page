@@ -449,9 +449,9 @@ function renderizarDadosGlobais() {
     if (typeof renderKanbanCards === 'function') renderKanbanCards();
 }
 
-// Mantém os metadados editáveis do rodapé do One Page sincronizados com o
-// estado. Sem essa sincronização, qualquer nova renderização (inclusive a
-// iniciada pela exportação) restaura os textos padrão "Nome" e "dd/mm/aaaa".
+// Mantém todos os conteúdos editáveis do One Page sincronizados com o estado,
+// incluindo o HTML inline criado pela barra de cor e tamanho da fonte. Assim,
+// a renderização iniciada pela exportação não reduz o conteúdo a texto simples.
 function sincronizarMetadadosOnePageDoDOM() {
     [
         ["txt-resp-mro", "respMro", "Nome"],
@@ -460,7 +460,35 @@ function sincronizarMetadadosOnePageDoDOM() {
     ].forEach(([elementId, stateKey, fallback]) => {
         const element = document.getElementById(elementId);
         if (!element) return;
-        AppState[stateKey] = element.textContent.trim() || fallback;
+        AppState[stateKey] = element.innerHTML.trim() || fallback;
+    });
+
+    [
+        ["slide2-header-contrato", "slide2HeaderContrato"],
+        ["slide2-header-title", "slide2HeaderTitle"],
+        ["slide2-header-subtitle", "slide2HeaderSubtitle"]
+    ].forEach(([elementId, stateKey]) => {
+        const element = document.getElementById(elementId);
+        if (element) AppState[stateKey] = element.innerHTML.trim();
+    });
+
+    document.querySelectorAll("#slide-2 .editable-list[data-key]").forEach(listEl => {
+        const values = Array.from(listEl.querySelectorAll(":scope > li .onepage-list-text"))
+            .map(element => element.innerHTML.trim())
+            .filter(value => value !== "");
+        syncEditableList(listEl.dataset.key, values);
+        editableListSources.set(listEl.id, values);
+    });
+
+    document.querySelectorAll("#table-slas tbody tr").forEach((row, index) => {
+        const item = AppState.slas?.[index];
+        if (!item) return;
+        const editableValues = row.querySelectorAll("td .editable-text");
+        if (editableValues[0]) item.sla = editableValues[0].innerHTML.trim() || "-";
+        ["meta", "atual", "m1", "acumulado"].forEach((field, fieldIndex) => {
+            const element = editableValues[fieldIndex + 1];
+            if (element) item[field] = element.innerHTML.trim() || "-";
+        });
     });
 }
 
@@ -474,6 +502,19 @@ function configurarEventosGerais() {
             salvarDados();
         });
     }
+
+    [
+        ["slide2-header-contrato", "slide2HeaderContrato"],
+        ["slide2-header-title", "slide2HeaderTitle"],
+        ["slide2-header-subtitle", "slide2HeaderSubtitle"]
+    ].forEach(([elementId, stateKey]) => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        element.addEventListener("blur", () => {
+            AppState[stateKey] = element.innerHTML.trim();
+            salvarDados();
+        });
+    });
 
     ["txt-resp-mro", "txt-resp-cliente", "txt-prox-reuniao"].forEach(elementId => {
         const element = document.getElementById(elementId);
@@ -1613,9 +1654,9 @@ function renderList(listId, dataArray) {
         const text = document.createElement("span");
         text.className = "editable-text onepage-list-text";
         text.contentEditable = modoEdicao ? "true" : "false";
-        text.textContent = item;
+        text.innerHTML = item;
         text.addEventListener("blur", () => {
-            values[index] = text.textContent.trim() || "Novo item";
+            values[index] = text.innerHTML.trim() || "Novo item";
             syncEditableList(key, values);
             salvarDados();
             autoFitCompact();
@@ -1670,8 +1711,8 @@ function renderTabelaSLAs() {
         const nomeText = document.createElement("span");
         nomeText.className = "editable-text";
         nomeText.contentEditable = modoEdicao ? "true" : "false";
-        nomeText.textContent = item.sla || "";
-        nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.textContent));
+        nomeText.innerHTML = item.sla || "";
+        nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.innerHTML));
         nome.appendChild(nomeText);
         row.appendChild(nome);
 
@@ -1686,8 +1727,8 @@ function renderTabelaSLAs() {
             const valueText = document.createElement("span");
             valueText.className = "editable-text";
             valueText.contentEditable = modoEdicao ? "true" : "false";
-            valueText.textContent = value ?? "-";
-            valueText.addEventListener("blur", () => window.updateSlaField(index, field, valueText.textContent));
+            valueText.innerHTML = value ?? "-";
+            valueText.addEventListener("blur", () => window.updateSlaField(index, field, valueText.innerHTML));
             cell.appendChild(valueText);
             const hasUpTrend = typeof item.trendArrow === "string" && item.trendArrow.includes("trend-up");
             const hasDownTrend = typeof item.trendArrow === "string" && item.trendArrow.includes("trend-down");
@@ -2913,13 +2954,50 @@ const scaleUniform = drawW / contRect.width; // ex: 10 / 1280
                             let text = el.innerText || el.textContent;
                             text = text.trim();
                             if(!text) return;
+
+                            // O editor pode aplicar estilos em spans/fontes internos.
+                            // Cada trecho vira um run do PowerPoint com seu próprio
+                            // tamanho e cor, em vez de herdar o padrão do elemento pai.
+                            const richTextRuns = [];
+                            const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                            let textNode;
+                            while ((textNode = walker.nextNode())) {
+                                const parent = textNode.parentElement;
+                                if (!parent || parent.closest(".bullet-actions, .edit-only-inline, .edit-only-block")) continue;
+
+                                const runText = textNode.nodeValue || "";
+                                if (!runText) continue;
+
+                                const runStyle = window.getComputedStyle(parent);
+                                if (runStyle.display === "none" || runStyle.visibility === "hidden") continue;
+
+                                const runFontSizePx = parseFloat(runStyle.fontSize);
+                                const runOptions = {
+                                    color: rgbToHex(runStyle.color) || defaultColor,
+                                    fontFace: runStyle.fontFamily.includes("Outfit") ? "Outfit" : defaultFont
+                                };
+                                if (!Number.isNaN(runFontSizePx)) runOptions.fontSize = runFontSizePx * 0.75;
+                                if (parseInt(runStyle.fontWeight, 10) > 500 || runStyle.fontWeight === "bold") runOptions.bold = true;
+                                if (runStyle.fontStyle === "italic") runOptions.italic = true;
+                                if (runStyle.textDecorationLine?.includes("underline")) runOptions.underline = true;
+
+                                richTextRuns.push({ text: runText, options: runOptions });
+                            }
+
+                            if (richTextRuns.length > 0) {
+                                richTextRuns[0].text = richTextRuns[0].text.replace(/^\s+/, "");
+                                richTextRuns[richTextRuns.length - 1].text = richTextRuns[richTextRuns.length - 1].text.replace(/\s+$/, "");
+                            }
                             
                             if (isLi) {
                                 coords.bullet = true;
                                 coords.align = "left";
                             }
                             
-                            s.addText(text, coords);
+                            const textForPowerPoint = richTextRuns.some(run => run.text.length > 0)
+                                ? richTextRuns.filter(run => run.text.length > 0)
+                                : text;
+                            s.addText(textForPowerPoint, coords);
                         }
                         
                         if (sIdx === 1) {

@@ -2244,6 +2244,21 @@ tr.row-status-red [data-field="atual"], tr.row-status-red [data-field="m1"], tr.
     color: transparent !important;
 }
 
+/* Formatações individuais ficam em elementos internos. Elas também precisam
+   desaparecer da imagem-base do PPTX editável para não serem duplicadas pelos
+   textos editáveis que são adicionados depois com os mesmos estilos. */
+.hide-text-for-capture .capa-subtitle *,
+.hide-text-for-capture .capa-title *,
+.hide-text-for-capture .capa-periodo *,
+.hide-text-for-capture .slide-header-contrato *,
+.hide-text-for-capture .slide-header-title *,
+.hide-text-for-capture .slide-header-subtitle *,
+.hide-text-for-capture .editable-list li *,
+.hide-text-for-capture .sla-table th *,
+.hide-text-for-capture .sla-table td * {
+    color: transparent !important;
+}
+
 
 /* Classes de compactacao dinamica para caber no 16:9 */
 .compact-1 .sla-table td, .compact-1 .sla-table th { padding: 4px 8px !important; font-size: 10px !important; }
