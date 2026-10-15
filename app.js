@@ -322,7 +322,12 @@ function selecionarSlide(index) {
 }
 
 function salvarDados() {
-    localStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+    try {
+        localStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+    } catch (error) {
+        // O cache local nunca pode invalidar um salvamento confirmado no Supabase.
+        console.warn("Não foi possível atualizar o cache local:", error);
+    }
 }
 
 function carregarDados() {
@@ -378,6 +383,22 @@ function sincronizarDadosContratoAtivo() {
             ]
         };
     }
+
+    // Cabeçalhos pertencem ao contrato, não ao estado global da última tela
+    // exibida. Assim, ao alternar o filtro, um título editado em outro
+    // contrato não permanece indevidamente no One Page atual.
+    const cabecalhoPadrao = {
+        contrato: c,
+        titulo: `One-Page Executivo - ${c}`,
+        subtitulo: `${c} | ${AppState.periodo}`
+    };
+    AppState.dadosContratos[c].cabecalho = {
+        ...cabecalhoPadrao,
+        ...(AppState.dadosContratos[c].cabecalho || {})
+    };
+    AppState.slide2HeaderContrato = AppState.dadosContratos[c].cabecalho.contrato;
+    AppState.slide2HeaderTitle = AppState.dadosContratos[c].cabecalho.titulo;
+    AppState.slide2HeaderSubtitle = AppState.dadosContratos[c].cabecalho.subtitulo;
     
     AppState.destaques = AppState.dadosContratos[c].destaques || [];
     AppState.atencoes = AppState.dadosContratos[c].atencoes || [];
@@ -444,6 +465,53 @@ function renderizarDadosGlobais() {
     if (typeof renderKanbanCards === 'function') renderKanbanCards();
 }
 
+function obterHtmlEditavelOuFallback(element, fallback) {
+    if (!element || !element.textContent.trim()) return fallback;
+    return element.innerHTML;
+}
+
+// Mantém todo o conteúdo rico do One Page sincronizado com o estado antes de
+// qualquer nova renderização. Cor e tamanho são gravados como marcação inline
+// pelo editor e, por isso, não podem ser convertidos para texto simples.
+function sincronizarMetadadosOnePageDoDOM() {
+    [
+        ["slide2-header-contrato", "slide2HeaderContrato", AppState.contrato || "CBO"],
+        ["slide2-header-title", "slide2HeaderTitle", `One-Page Executivo - ${AppState.contrato}`],
+        ["slide2-header-subtitle", "slide2HeaderSubtitle", `${AppState.contrato} | ${AppState.periodo}`],
+        ["txt-resp-mro", "respMro", "Nome"],
+        ["txt-resp-cliente", "respCliente", "Nome"],
+        ["txt-prox-reuniao", "proxReuniao", "dd/mm/aaaa"]
+    ].forEach(([elementId, stateKey, fallback]) => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        AppState[stateKey] = obterHtmlEditavelOuFallback(element, fallback);
+    });
+
+    const contrato = AppState.contrato || "CBO";
+    if (AppState.dadosContratos?.[contrato]) {
+        AppState.dadosContratos[contrato].cabecalho = {
+            contrato: AppState.slide2HeaderContrato || contrato,
+            titulo: AppState.slide2HeaderTitle || `One-Page Executivo - ${contrato}`,
+            subtitulo: AppState.slide2HeaderSubtitle || `${contrato} | ${AppState.periodo}`
+        };
+    }
+
+    document.querySelectorAll("#slide-2 .editable-list[data-key]").forEach(list => {
+        const values = Array.from(list.querySelectorAll(":scope > li .onepage-list-text"))
+            .map(element => obterHtmlEditavelOuFallback(element, "Novo item"));
+        syncEditableList(list.dataset.key, values);
+        editableListSources.set(list.id, values);
+    });
+
+    document.querySelectorAll("#table-slas tbody tr[data-sla-index]").forEach(row => {
+        const item = AppState.slas?.[Number(row.dataset.slaIndex)];
+        if (!item) return;
+        row.querySelectorAll(".editable-text[data-field]").forEach(element => {
+            item[element.dataset.field] = obterHtmlEditavelOuFallback(element, "-");
+        });
+    });
+}
+
 function configurarEventosGerais() {
     const capaPeriodo = document.getElementById("slide1-periodo-text");
     if (capaPeriodo) {
@@ -454,6 +522,27 @@ function configurarEventosGerais() {
             salvarDados();
         });
     }
+
+    [
+        "slide2-header-contrato",
+        "slide2-header-title",
+        "slide2-header-subtitle",
+        "txt-resp-mro",
+        "txt-resp-cliente",
+        "txt-prox-reuniao"
+    ].forEach(elementId => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+
+        // O evento input protege o valor mesmo se outra ação renderizar o One
+        // Page antes de o campo perder o foco.
+        element.addEventListener("input", sincronizarMetadadosOnePageDoDOM);
+        element.addEventListener("blur", () => {
+            sincronizarMetadadosOnePageDoDOM();
+            salvarDados();
+            if (typeof updatePlaceholderColors === "function") updatePlaceholderColors();
+        });
+    });
 
     if (btnExportPdf) {
         btnExportPdf.addEventListener("click", exportarPDF);
@@ -524,8 +613,16 @@ function configurarEventosGerais() {
     }
 
     if (typeof btnSave !== 'undefined' && btnSave) {
-        btnSave.addEventListener("click", () => {
-            salvarNovaVersao();
+        btnSave.addEventListener("click", async () => {
+            btnSave.disabled = true;
+            const textoAnterior = btnSave.textContent;
+            btnSave.textContent = "Salvando versão...";
+            try {
+                await salvarNovaVersao();
+            } finally {
+                btnSave.disabled = false;
+                btnSave.textContent = textoAnterior;
+            }
         });
     }
 
@@ -540,6 +637,10 @@ function configurarEventosGerais() {
 
     if (typeof btnToggleEdit !== 'undefined' && btnToggleEdit) {
         btnToggleEdit.addEventListener("click", () => {
+            if (modoEdicao) {
+                sincronizarMetadadosOnePageDoDOM();
+                salvarDados();
+            }
             modoEdicao = !modoEdicao;
             btnToggleEdit.classList.toggle("active", modoEdicao);
             atualizarModoUI();
@@ -552,14 +653,12 @@ function configurarEventosGerais() {
             if (!verId) return;
             const ver = AppState.historicoVersoes.find(v => v.id === verId);
             if (ver) {
-                const tempHistory = AppState.historicoVersoes;
-                AppState = JSON.parse(JSON.stringify(ver.dados));
-                AppState.historicoVersoes = tempHistory;
+                restaurarInformacoesComplementaresDaVersao(ver.dados);
                 salvarDados();
                 if (filterContrato) filterContrato.value = AppState.contrato;
                 if (typeof atualizarFiltrosLocalidade === 'function') atualizarFiltrosLocalidade();
                 if (typeof atualizarDashboardECartas === 'function') atualizarDashboardECartas();
-                if (typeof mostrarNotificacao === 'function') mostrarNotificacao(`Versão "${ver.nome}" carregada!`, "success");
+                if (typeof mostrarNotificacao === 'function') mostrarNotificacao(`Comentários e informações complementares da versão "${ver.nome}" carregados!`, "success");
             }
         });
     }
@@ -648,18 +747,41 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-// slot versions
-function atualizarDropdownVersoes() {
+// O Supabase é a fonte oficial do histórico; o AppState mantém somente um cache.
+let requisicaoVersoesAtual = 0;
+
+async function atualizarDropdownVersoes() {
     if (!selectVersionsContract) return;
-    
+
+    const numeroRequisicao = ++requisicaoVersoesAtual;
     const valAnterior = selectVersionsContract.value;
     selectVersionsContract.innerHTML = '<option value="">Últimas versões por contrato</option>';
-    
     const contratoAtivo = filterContrato.value;
-    AppState.historicoVersoes = AppState.historicoVersoes || [];
-    
-    const versoesFiltradas = AppState.historicoVersoes.filter(v => v.contrato === contratoAtivo);
-    
+    if (!contratoAtivo) return;
+
+    let versoesFiltradas = [];
+    try {
+        if (typeof window.listarVersoesContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        versoesFiltradas = await window.listarVersoesContratoSupabase(contratoAtivo);
+        if (numeroRequisicao !== requisicaoVersoesAtual || filterContrato.value !== contratoAtivo) return;
+
+        const outrosContratos = (AppState.historicoVersoes || [])
+            .filter(versao => versao.contrato !== contratoAtivo);
+        AppState.historicoVersoes = [...outrosContratos, ...versoesFiltradas];
+        salvarDados();
+    } catch (error) {
+        console.error("Erro ao carregar versões do Supabase:", error);
+        if (numeroRequisicao !== requisicaoVersoesAtual) return;
+        const optionErro = document.createElement("option");
+        optionErro.value = "";
+        optionErro.textContent = "Não foi possível carregar as versões";
+        optionErro.disabled = true;
+        selectVersionsContract.appendChild(optionErro);
+        return;
+    }
+
     versoesFiltradas.forEach(v => {
         const opt = document.createElement("option");
         opt.value = v.id;
@@ -672,11 +794,184 @@ function atualizarDropdownVersoes() {
     }
 }
 
-// Salva uma nova versão acumulativa do dashboard atual
-function salvarNovaVersao() {
+function copiarParaVersao(valor) {
+    return valor === undefined ? undefined : JSON.parse(JSON.stringify(valor));
+}
+
+function normalizarChaveVersao(valor) {
+    return String(valor ?? "").trim().normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+// A mesma chave é usada ao importar e ao recuperar uma versão. Ela não depende
+// da posição da linha na planilha, que pode mudar entre competências.
+function obterChaveRegistroEstavel(registro) {
+    const mes = registro.mesIdx ?? registro.competencia ?? registro.mes ?? "";
+    return [
+        registro.contrato ?? registro.cliente,
+        registro.localidade,
+        registro.pilar,
+        registro.grupo,
+        registro.indicador,
+        mes
+    ].map(normalizarChaveVersao).join("\u0000");
+}
+
+function atualizarPeriodoPelaCompetencia(competencia) {
+    const match = String(competencia || "").match(/^(\d{2})\/(\d{4})$/);
+    if (!match) return;
+
+    const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    const indiceMes = Number(match[1]) - 1;
+    if (indiceMes < 0 || indiceMes > 11) return;
+
+    const periodoAnterior = AppState.periodo;
+    const periodoNovo = `${meses[indiceMes]}/${match[2]}`;
+    const contrato = AppState.contrato || "CBO";
+    AppState.periodo = periodoNovo;
+    AppState.anoAtual = match[2];
+
+    // Apenas subtítulos automáticos acompanham a competência importada.
+    // Um subtítulo que o usuário tenha personalizado continua intacto.
+    const dadosContrato = AppState.dadosContratos?.[contrato];
+    const cabecalho = dadosContrato?.cabecalho;
+    if (cabecalho && (!cabecalho.subtitulo || cabecalho.subtitulo === `${contrato} | ${periodoAnterior}`)) {
+        cabecalho.subtitulo = `${contrato} | ${periodoNovo}`;
+        AppState.slide2HeaderSubtitle = cabecalho.subtitulo;
+    }
+}
+
+// Comentários e ajustes visuais pertencem ao registro lógico, e não à posição
+// que ele ocupa em uma importação. Esta mesclagem protege esses campos quando
+// a base do mesmo contrato/indicador é atualizada.
+function preservarInformacoesComplementaresNosRegistros(novosRegistros) {
+    if (!Array.isArray(novosRegistros)) return novosRegistros;
+
+    const anterioresPorChave = new Map((AppState.excelData || []).map(registro => [
+        registro.registroId || obterChaveRegistroEstavel(registro), registro
+    ]));
+
+    return novosRegistros.map(registro => {
+        const registroId = obterChaveRegistroEstavel(registro);
+        const anterior = anterioresPorChave.get(registroId);
+        const resultado = { ...registro, registroId };
+        if (anterior) {
+            ["comment", "arrow", "status", "icon", "acumAnteriorOverride"].forEach(campo => {
+                if (anterior[campo] !== undefined) resultado[campo] = anterior[campo];
+            });
+        }
+        return resultado;
+    });
+}
+
+function mesclarRegistrosImportados(registrosImportados) {
+    const atualizados = preservarInformacoesComplementaresNosRegistros(registrosImportados);
+    const porChave = new Map((AppState.excelData || []).map(registro => [
+        registro.registroId || obterChaveRegistroEstavel(registro), registro
+    ]));
+    atualizados.forEach(registro => porChave.set(registro.registroId, registro));
+    return [...porChave.values()];
+}
+
+function obterAnotacoesIndicadoresDaVersao() {
+    return (AppState.indicadores || []).map(indicador => ({
+        // contrato + localidade + indicador são a identidade estável do cartão.
+        contrato: indicador.scopeContrato || indicador.contrato || AppState.contrato,
+        localidade: indicador.scopeLocalidade || indicador.localidade || "todos",
+        indicador: indicador.indicador || indicador.title,
+        comment: indicador.comment,
+        arrow: indicador.arrow,
+        status: indicador.status,
+        icon: indicador.icon,
+        acumAnterior: indicador.acumAnterior
+    }));
+}
+
+function aplicarAnotacoesIndicadoresDaVersao(anotacoes) {
+    if (!Array.isArray(anotacoes) || !Array.isArray(AppState.excelData)) return;
+
+    anotacoes.forEach(anotacao => {
+        const contrato = anotacao.contrato || AppState.contrato;
+        const localidade = anotacao.localidade || "todos";
+        AppState.excelData.forEach(registro => {
+            if (registro.contrato !== contrato || registro.indicador !== anotacao.indicador) return;
+            if (localidade !== "todos" && registro.localidade !== localidade) return;
+            ["comment", "arrow", "status", "icon"].forEach(campo => {
+                if (anotacao[campo] !== undefined) registro[campo] = anotacao[campo];
+            });
+            if (anotacao.acumAnterior !== undefined) registro.acumAnteriorOverride = anotacao.acumAnterior;
+        });
+    });
+}
+
+function restaurarInformacoesComplementaresDaVersao(dadosVersao) {
+    if (!dadosVersao || typeof dadosVersao !== "object") return;
+
+    const atual = AppState;
+    const historicoVersoes = atual.historicoVersoes || [];
+    const complemento = dadosVersao.complementar || dadosVersao;
+    const contrato = atual.contrato;
+
+    // Versões antigas continham o AppState completo. A leitura continua
+    // compatível, mas nunca reaproveita excelData nem dados de período delas.
+    const camposGlobais = [
+        "capaPeriodoTexto", "respMro", "respCliente", "proxReuniao",
+        "slide2HeaderContrato", "slide2HeaderTitle", "slide2HeaderSubtitle"
+    ];
+    camposGlobais.forEach(campo => {
+        if (complemento[campo] !== undefined) atual[campo] = copiarParaVersao(complemento[campo]);
+    });
+
+    // Snapshots anteriores a cabeçalhos por contrato ainda guardam esses
+    // campos no nível principal. Migra-os em memória ao restaurar, sem alterar
+    // o formato já armazenado no Supabase.
+    if (camposGlobais.some(campo => complemento[campo] !== undefined)) {
+        atual.dadosContratos = atual.dadosContratos || {};
+        atual.dadosContratos[contrato] = atual.dadosContratos[contrato] || {};
+        atual.dadosContratos[contrato].cabecalho = {
+            ...(atual.dadosContratos[contrato].cabecalho || {}),
+            ...(complemento.slide2HeaderContrato !== undefined ? { contrato: copiarParaVersao(complemento.slide2HeaderContrato) } : {}),
+            ...(complemento.slide2HeaderTitle !== undefined ? { titulo: copiarParaVersao(complemento.slide2HeaderTitle) } : {}),
+            ...(complemento.slide2HeaderSubtitle !== undefined ? { subtitulo: copiarParaVersao(complemento.slide2HeaderSubtitle) } : {})
+        };
+    }
+
+    const dadosContratoVersao = complemento.dadosContrato || complemento.dadosContratos?.[contrato];
+    if (dadosContratoVersao) {
+        atual.dadosContratos = atual.dadosContratos || {};
+        atual.dadosContratos[contrato] = {
+            ...(atual.dadosContratos[contrato] || {}),
+            ...copiarParaVersao(dadosContratoVersao)
+        };
+    }
+
+    // Compatibilidade com versões anteriores, que guardavam as listas também
+    // no nível principal do snapshot.
+    ["destaques", "atencoes", "passos", "pendenciasMro", "pendenciasCliente",
+        "reunioesExecutivas", "slide11Participants"].forEach(campo => {
+        if (complemento[campo] === undefined) return;
+        atual.dadosContratos = atual.dadosContratos || {};
+        atual.dadosContratos[contrato] = atual.dadosContratos[contrato] || {};
+        atual.dadosContratos[contrato][campo] = copiarParaVersao(complemento[campo]);
+    });
+
+    if (complemento.acoes?.direcionadoresAcoes !== undefined) {
+        atual.acoes = atual.acoes || {};
+        atual.acoes.direcionadoresAcoes = copiarParaVersao(complemento.acoes.direcionadoresAcoes);
+    }
+
+    aplicarAnotacoesIndicadoresDaVersao(complemento.anotacoesIndicadores || complemento.indicadores);
+    atual.historicoVersoes = historicoVersoes;
+    sincronizarDadosContratoAtivo();
+}
+
+// Salva apenas conteúdo editorial. Os indicadores importados continuam sendo
+// controlados pela base mais recente no Supabase.
+async function salvarNovaVersao() {
     if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
     }
+    sincronizarMetadadosOnePageDoDOM();
     
     const defaultName = AppState.contrato || "Versão Sem Nome";
     const nomeVersaoInput = prompt("Digite o nome ou identificador para esta versão:", defaultName);
@@ -684,51 +979,50 @@ function salvarNovaVersao() {
     
     const nomeVersao = nomeVersaoInput.trim() || defaultName;
     
-    const agora = new Date();
-    const dia = String(agora.getDate()).padStart(2, '0');
-    const mes = String(agora.getMonth() + 1).padStart(2, '0');
-    const ano = agora.getFullYear();
-    const horas = String(agora.getHours()).padStart(2, '0');
-    const minutos = String(agora.getMinutes()).padStart(2, '0');
-    const dataHora = `${dia}/${mes}/${ano} | ${horas}:${minutos}`;
-    
     const snapshot = {
+        formato: "complementar-v2",
         contrato: AppState.contrato,
-        periodo: AppState.periodo,
+        complementar: {
         respMro: AppState.respMro,
         respCliente: AppState.respCliente,
         proxReuniao: AppState.proxReuniao,
-        destaques: [...AppState.destaques],
-        atencoes: [...AppState.atencoes],
-        passos: [...AppState.passos],
-        pendenciasMro: [...AppState.pendenciasMro],
-        pendenciasCliente: [...AppState.pendenciasCliente],
-        slas: JSON.parse(JSON.stringify(AppState.slas)),
-        indicadores: JSON.parse(JSON.stringify(AppState.indicadores)),
-        reunioesExecutivas: JSON.parse(JSON.stringify(AppState.reunioesExecutivas)),
-        slide11Participants: [...AppState.slide11Participants],
-        excelData: AppState.excelData ? JSON.parse(JSON.stringify(AppState.excelData)) : null,
-        dadosContratos: AppState.dadosContratos ? JSON.parse(JSON.stringify(AppState.dadosContratos)) : {},
-        anoAnterior: AppState.anoAnterior,
-        anoAtual: AppState.anoAtual
+        capaPeriodoTexto: AppState.capaPeriodoTexto,
+        slide2HeaderContrato: AppState.slide2HeaderContrato,
+        slide2HeaderTitle: AppState.slide2HeaderTitle,
+        slide2HeaderSubtitle: AppState.slide2HeaderSubtitle,
+        dadosContrato: copiarParaVersao(AppState.dadosContratos?.[AppState.contrato] || {}),
+        acoes: { direcionadoresAcoes: copiarParaVersao(AppState.acoes?.direcionadoresAcoes || []) },
+        anotacoesIndicadores: obterAnotacoesIndicadoresDaVersao()
+        }
     };
     
-    AppState.historicoVersoes = AppState.historicoVersoes || [];
-    
-    const novaVersao = {
-        id: "ver-" + Date.now(),
+    const versaoParaSalvar = {
         nome: nomeVersao,
         contrato: AppState.contrato,
-        dataHora: dataHora,
+        periodo: AppState.periodo,
         dados: snapshot
     };
-    
-    AppState.historicoVersoes.push(novaVersao);
-    
-    salvarDados();
-    atualizarDropdownVersoes();
-    selectVersionsContract.value = novaVersao.id;
-    mostrarNotificacao(`Versão "${nomeVersao}" salva com sucesso no histórico!`, "success");
+
+    try {
+        if (typeof window.salvarVersaoContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        const novaVersao = await window.salvarVersaoContratoSupabase(versaoParaSalvar);
+        AppState.historicoVersoes = AppState.historicoVersoes || [];
+        AppState.historicoVersoes = [
+            ...AppState.historicoVersoes.filter(versao => versao.id !== novaVersao.id),
+            novaVersao
+        ];
+        salvarDados();
+        await atualizarDropdownVersoes();
+        selectVersionsContract.value = novaVersao.id;
+        mostrarNotificacao(`Versão "${nomeVersao}" salva com sucesso no Supabase!`, "success");
+        return novaVersao;
+    } catch (error) {
+        console.error("Erro ao salvar versão no Supabase:", error);
+        alert(error.message);
+        return null;
+    }
 }
 
 
@@ -942,8 +1236,9 @@ function sincronizarMetadadosIndicador(ind) {
     let found = false;
     AppState.excelData.forEach(row => {
         const matchContrato = row.contrato === ind.contrato;
-        const matchLocalidade = ind.localidade === "todos" || row.localidade === ind.localidade;
-        if (matchContrato && matchLocalidade) {
+        const matchLocalidade = ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade;
+        const matchIndicador = row.indicador === ind.indicador;
+        if (matchContrato && matchLocalidade && matchIndicador) {
             row.meta = ind.meta;
             row.formula = ind.formula;
             row.comment = ind.comment;
@@ -977,20 +1272,27 @@ function sincronizarValoresGrafico(ind) {
     
     // As referências são capturadas no momento em que o gráfico é montado.
     // Assim, editar um slide nunca alcança linhas pertencentes a outro indicador.
+    const scopeContrato = ind.scopeContrato && ind.scopeContrato !== "todos"
+        ? ind.scopeContrato
+        : ind.contrato;
+    const scopeLocalidade = ind.scopeLocalidade || ind.localidade || "todos";
+    const pertenceAoGrafico = row =>
+        row.indicador === ind.indicador &&
+        row.contrato === scopeContrato &&
+        (scopeLocalidade === "todos" || row.localidade === scopeLocalidade);
+
     const sourceRows = Array.isArray(ind.sourceRows)
-        ? ind.sourceRows.filter(row => AppState.excelData.includes(row) && row.indicador === ind.indicador)
+        ? ind.sourceRows.filter(row => AppState.excelData.includes(row) && pertenceAoGrafico(row))
         : AppState.excelData.filter(row =>
-            row.indicador === ind.indicador &&
-            (ind.scopeContrato === "todos" || row.contrato === ind.scopeContrato) &&
-            (ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade)
+            pertenceAoGrafico(row)
         );
 
-    const fallbackIdx = AppState.indicadores.findIndex(item =>
-        (item.indicador || item.title) === ind.indicador
-    );
-    if (fallbackIdx !== -1 && AppState.indicadores[fallbackIdx]) {
-        AppState.indicadores[fallbackIdx].acum2025 = ind.acumAnterior;
-    }
+    // O acumulado anterior editado pertence somente a este gráfico. Guardá-lo
+    // no fallback global por nome fazia contratos diferentes compartilharem o
+    // mesmo valor.
+    sourceRows.forEach(row => {
+        row.acumAnteriorOverride = ind.acumAnterior;
+    });
 
     const templateRow = sourceRows[0] || null;
     
@@ -1021,7 +1323,9 @@ function sincronizarValoresGrafico(ind) {
     salvarDados();
 }
 
-// Filtra e retorna todos os indicadores da planilha Excel dinamicamente por referência direta, consolidando por nome de Indicador
+// Filtra e retorna os indicadores da planilha por referência direta. Quando
+// "todos" os contratos estão selecionados, cada contrato mantém seu próprio
+// gráfico mesmo que possua um indicador com o mesmo nome.
 function obterDadosFiltrados() {
     const contratoSel = filterContrato.value;
     const localidadeSel = filterLocalidade.value;
@@ -1034,20 +1338,23 @@ function obterDadosFiltrados() {
             return matchContrato && matchLocalidade;
         });
         
-        // Agrupa os registros unicamente pelo nome do Indicador
+        // A identidade do gráfico é contrato + indicador. Localidades continuam
+        // consolidadas quando o filtro de localidade estiver em "todos".
         const grouped = {};
         
         filteredRaw.forEach(row => {
             const indName = row.indicador;
-            if (!grouped[indName]) {
+            const rowContrato = String(row.contrato || "").trim();
+            const groupKey = `${rowContrato}\u0000${indName}`;
+            if (!grouped[groupKey]) {
                 const nameLower = indName.toLowerCase();
                 let isPct = !nameLower.includes("acidente") && !nameLower.includes("cpt") && !nameLower.includes("spt");
                 
-                grouped[indName] = {
-                    id: indName.toLowerCase().replace(/[^a-z0-9]/g, ""),
-                    contrato: contratoSel === "todos" ? AppState.contrato : contratoSel,
+                grouped[groupKey] = {
+                    id: `${rowContrato}-${indName}`.toLowerCase().replace(/[^a-z0-9]/g, ""),
+                    contrato: rowContrato,
                     localidade: localidadeSel,
-                    scopeContrato: contratoSel,
+                    scopeContrato: rowContrato,
                     scopeLocalidade: localidadeSel,
                     indicador: indName,
                     pilar: row.pilar,
@@ -1072,12 +1379,12 @@ function obterDadosFiltrados() {
                 };
             }
 
-            grouped[indName].sourceRows.push(row);
+            grouped[groupKey].sourceRows.push(row);
             
-            const isPct = grouped[indName].isPercentage;
+            const isPct = grouped[groupKey].isPercentage;
             const valBase = parseValorDadosBase(row.dadosBase, isPct);
             if (valBase !== null) {
-                grouped[indName].monthlyRawValues[row.mesIdx].push(valBase);
+                grouped[groupKey].monthlyRawValues[row.mesIdx].push(valBase);
             }
             
             let metaNum = parseFloat(String(row.meta).replace("%", "").replace(",", ".").trim());
@@ -1085,7 +1392,7 @@ function obterDadosFiltrados() {
                 if (isPct && metaNum >= 0 && metaNum <= 1.5) {
                     metaNum = metaNum * 100;
                 }
-                grouped[indName].monthlyRawMetas[row.mesIdx].push(metaNum);
+                grouped[groupKey].monthlyRawMetas[row.mesIdx].push(metaNum);
             }
         });
         
@@ -1137,13 +1444,18 @@ function obterDadosFiltrados() {
             ind.meta = metaRep;
             
                         // Recupera acumulado anterior correspondente a partir da planilha de ano anterior
-            let oldAcum = null;
+            const sourceWithOverride = ind.sourceRows.find(row =>
+                Object.prototype.hasOwnProperty.call(row, "acumAnteriorOverride")
+            );
+            let oldAcum = sourceWithOverride
+                ? sourceWithOverride.acumAnteriorOverride
+                : null;
             if (AppState.excelDataAnterior && AppState.excelDataAnterior.length > 0) {
-                const prevRows = AppState.excelDataAnterior.filter(row => {
-                    const matchContrato = contratoSel === "todos" || row.contrato === ind.contrato;
-                    const matchLocalidade = localidadeSel === "todos" || row.localidade === ind.localidade;
+                const prevRows = oldAcum === null ? AppState.excelDataAnterior.filter(row => {
+                    const matchContrato = row.contrato === ind.scopeContrato;
+                    const matchLocalidade = ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade;
                     return matchContrato && matchLocalidade && row.indicador === ind.indicador;
-                });
+                }) : [];
                 
                 const prevVals = [];
                 prevRows.forEach(row => {
@@ -1526,9 +1838,9 @@ function renderList(listId, dataArray) {
         const text = document.createElement("span");
         text.className = "editable-text onepage-list-text";
         text.contentEditable = modoEdicao ? "true" : "false";
-        text.textContent = item;
+        text.innerHTML = item;
         text.addEventListener("blur", () => {
-            values[index] = text.textContent.trim() || "Novo item";
+            values[index] = obterHtmlEditavelOuFallback(text, "Novo item");
             syncEditableList(key, values);
             salvarDados();
             autoFitCompact();
@@ -1576,15 +1888,17 @@ function renderTabelaSLAs() {
     tbody.replaceChildren();
     (AppState.slas || []).forEach((item, index) => {
         const row = document.createElement("tr");
+        row.dataset.slaIndex = index;
         const status = ["green", "yellow", "red"].includes(item.status) ? item.status : "green";
         row.className = `row-status-${status}`;
 
         const nome = document.createElement("td");
         const nomeText = document.createElement("span");
         nomeText.className = "editable-text";
+        nomeText.dataset.field = "sla";
         nomeText.contentEditable = modoEdicao ? "true" : "false";
-        nomeText.textContent = item.sla || "";
-        nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.textContent));
+        nomeText.innerHTML = item.sla || "";
+        nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.innerHTML, nomeText.textContent));
         nome.appendChild(nomeText);
         row.appendChild(nome);
 
@@ -1598,9 +1912,10 @@ function renderTabelaSLAs() {
             cell.dataset.field = field;
             const valueText = document.createElement("span");
             valueText.className = "editable-text";
+            valueText.dataset.field = field;
             valueText.contentEditable = modoEdicao ? "true" : "false";
-            valueText.textContent = value ?? "-";
-            valueText.addEventListener("blur", () => window.updateSlaField(index, field, valueText.textContent));
+            valueText.innerHTML = value ?? "-";
+            valueText.addEventListener("blur", () => window.updateSlaField(index, field, valueText.innerHTML, valueText.textContent));
             cell.appendChild(valueText);
             const hasUpTrend = typeof item.trendArrow === "string" && item.trendArrow.includes("trend-up");
             const hasDownTrend = typeof item.trendArrow === "string" && item.trendArrow.includes("trend-down");
@@ -1667,9 +1982,9 @@ function renderTabelaSLAs() {
     ensureAddItemButton(document.querySelector("#slide-2 .card-slas"), "btn-add-item-slas", window.addSlaIndicator);
 }
 
-window.updateSlaField = function(index, field, value) {
+window.updateSlaField = function(index, field, value, plainText = value) {
     if (!AppState.slas || !AppState.slas[index]) return;
-    AppState.slas[index][field] = value.trim() || "-";
+    AppState.slas[index][field] = String(plainText).trim() ? value : "-";
     salvarDados();
     renderTabelaSLAs();
 };
@@ -2030,7 +2345,7 @@ function processExcelData(matrix) {
 window.aplicarRegistrosImportados = function(records) {
     if (!Array.isArray(records) || records.length === 0) return;
 
-    AppState.excelData = records.map(record => ({
+    AppState.excelData = mesclarRegistrosImportados(records.map(record => ({
         localidade: record.localidade,
         contrato: record.cliente,
         pilar: record.pilar,
@@ -2040,7 +2355,7 @@ window.aplicarRegistrosImportados = function(records) {
         dadosBase: record.dados_base,
         meta: record.meta,
         formula: record.formula_calculo
-    }));
+    })));
 
     const contratos = [...new Set(records.map(record => record.cliente))];
     contratos.forEach(contrato => {
@@ -2427,18 +2742,86 @@ function exportarPDFLegado() {
 }
 
 async function criarOnePageParaExportacao(slideOriginal) {
-    // Captura o próprio componente já renderizado fora do modo de edição.
-    // Não há clone nem CSS alternativo para o One Page.
-    // A rotina responsiva existente precisa rodar com o slide visível;
-    // quando executada com ele oculto, a altura medida é zero.
-    if (typeof autoFitCompact === "function") autoFitCompact();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    // A exportação usa um clone isolado. Assim, os cards podem crescer e se
+    // redistribuir sem alterar a tela de edição nem sobrescrever estilos inline
+    // (fonte, tamanho, cor e ênfases) escolhidos pelo usuário.
+    const renderStage = document.createElement("div");
+    renderStage.className = "onepage-export-render-stage capturing";
+
+    const exportSlide = slideOriginal.cloneNode(true);
+    exportSlide.classList.remove("compact-1", "compact-2", "compact-3");
+    exportSlide.classList.add("active", "onepage-export-layout");
+    exportSlide.querySelectorAll("[style]").forEach(element => {
+        const inlineColor = element.style.getPropertyValue("color");
+        if (inlineColor) element.style.setProperty("color", inlineColor, "important");
+    });
+    exportSlide.querySelectorAll("[contenteditable]").forEach(element => {
+        element.setAttribute("contenteditable", "false");
+    });
+    renderStage.appendChild(exportSlide);
+    document.body.appendChild(renderStage);
+
+    // O texto padrão da próxima reunião é apenas uma orientação de edição e
+    // não deve aparecer no arquivo quando nenhuma data foi informada.
+    const proxReuniao = exportSlide.querySelector("#txt-prox-reuniao");
+    const proxReuniaoTexto = proxReuniao ? proxReuniao.textContent.trim() : "";
+    const ocultarPlaceholderProximaReuniao = proxReuniao && (
+        proxReuniaoTexto === "" || /^dd\s*\/\s*mm\s*\/\s*(?:aa|aaaa)$/i.test(proxReuniaoTexto)
+    );
+
+    if (ocultarPlaceholderProximaReuniao) {
+        proxReuniao.innerHTML = "";
+    }
+
+    if (document.fonts?.ready) await document.fonts.ready;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
+    // Testa proporções de coluna e mantém a que exige menos altura. A fonte
+    // nunca participa deste cálculo: somente a distribuição horizontal muda.
+    const grid = exportSlide.querySelector(".onepage-grid");
+    if (grid) {
+        let melhorPercentual = 37;
+        let menorAltura = Number.POSITIVE_INFINITY;
+        [36, 40, 32, 44, 48, 52, 56, 60].forEach(percentual => {
+            grid.style.gridTemplateColumns = `${percentual}fr ${100 - percentual}fr`;
+            const altura = exportSlide.scrollHeight;
+            if (altura < menorAltura) {
+                menorAltura = altura;
+                melhorPercentual = percentual;
+            }
+        });
+        grid.style.gridTemplateColumns = `${melhorPercentual}fr ${100 - melhorPercentual}fr`;
+    }
+
+    // Antes de aumentar a página, recupera espaço apenas em paddings, margens
+    // e gaps. As classes compactas não contêm mais nenhuma regra de fonte.
+    if (exportSlide.scrollHeight > 720) {
+        exportSlide.classList.add("compact-1");
+        if (exportSlide.scrollHeight > 720) {
+            exportSlide.classList.add("compact-2");
+            if (exportSlide.scrollHeight > 720) exportSlide.classList.add("compact-3");
+        }
+    }
+
+    // Na fileira inferior, cards com mais texto recebem proporcionalmente mais
+    // largura. Isso reduz quebras de linha sem modificar nenhum estilo de texto.
+    const cardsInferiores = Array.from(exportSlide.querySelectorAll(".cards-row > .card"));
+    cardsInferiores.forEach(card => {
+        const caracteres = Math.max(1, (card.textContent || "").trim().length);
+        card.style.flex = `${Math.min(3, Math.max(1, caracteres / 80))} 1 0`;
+    });
+
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const captureHeight = Math.max(720, Math.ceil(exportSlide.scrollHeight));
+    exportSlide.style.height = `${captureHeight}px`;
+    exportSlide.style.minHeight = `${captureHeight}px`;
+
     return {
-        element: slideOriginal,
-        height: 720,
-        cleanup() {}
+        element: exportSlide,
+        height: captureHeight,
+        cleanup() {
+            renderStage.remove();
+        }
     };
 }
 
@@ -2450,6 +2833,8 @@ async function exportarPDF() {
     const progressFill = document.getElementById("export-progress-fill");
     const slideAnterior = activeSlideIndex;
     const modoAnterior = modoEdicao;
+
+    sincronizarMetadadosOnePageDoDOM();
 
     if (!window.jspdf || typeof html2canvas === "undefined") {
         alert("Não foi possível carregar as bibliotecas de exportação. Atualize a página e tente novamente.");
@@ -2489,7 +2874,7 @@ async function exportarPDF() {
                     ? await criarOnePageParaExportacao(slideInfo.element)
                     : { element: slideInfo.element, height: 720, cleanup() {} };
 
-                const captureHeight = 720;
+                const captureHeight = exportVersion.height;
                 const canvas = await Promise.race([
                     html2canvas(exportVersion.element, {
                         scale: 3,
@@ -2509,7 +2894,7 @@ async function exportarPDF() {
                 ]);
 
                 if (index > 0) {
-                    pdf.addPage([1280, 720], "landscape");
+                    pdf.addPage([1280, captureHeight], captureHeight > 1280 ? "portrait" : "landscape");
                 }
                 pdf.addImage(
                     canvas.toDataURL("image/jpeg", 0.95),
@@ -2555,6 +2940,8 @@ async function exportarPPTXPadrao() {
     const slideAnterior = activeSlideIndex;
     const modoAnterior = modoEdicao;
 
+    sincronizarMetadadosOnePageDoDOM();
+
     if (typeof PptxGenJS === "undefined" || typeof html2canvas === "undefined") {
         alert("Não foi possível carregar as bibliotecas de exportação. Atualize a página e tente novamente.");
         return;
@@ -2581,8 +2968,21 @@ async function exportarPPTXPadrao() {
         await prepararLogosMro(slideCaptureArea);
 
         const slides = obterSlidesDisponiveis();
+        let onePageHeight = 720;
+        const onePageInfo = slides.find(slide => slide.index === 2);
+        if (onePageInfo) {
+            const measuredOnePage = await criarOnePageParaExportacao(onePageInfo.element);
+            onePageHeight = measuredOnePage.height;
+            measuredOnePage.cleanup();
+        }
+
+        // Um PowerPoint possui um único tamanho de página. Se o One Page
+        // precisar crescer, o deck cresce junto, preservando a escala dos
+        // textos em vez de comprimir a imagem verticalmente.
+        const deckHeightInches = Math.max(5.625, onePageHeight / 128);
         const pres = new PptxGenJS();
-        pres.layout = "LAYOUT_16x9";
+        pres.defineLayout({ name: "ONEPAGE_RESPONSIVE", width: 10, height: deckHeightInches });
+        pres.layout = "ONEPAGE_RESPONSIVE";
         pres.author = "MRO";
         pres.subject = "Boletim de Clientes";
         pres.title = `Boletim ${AppState.contrato}`;
@@ -2622,11 +3022,12 @@ async function exportarPPTXPadrao() {
             
             const imageData = canvas.toDataURL("image/jpeg", 0.95);
             const drawW = 10;
-            const drawH = 5.625;
+            const drawH = exportVersion.height / 128;
+            const drawY = (deckHeightInches - drawH) / 2;
 
             const pptSlide = pres.addSlide();
             pptSlide.background = { color: "FFFFFF" };
-            pptSlide.addImage({ data: imageData, x: 0, y: 0, w: drawW, h: drawH });
+            pptSlide.addImage({ data: imageData, x: 0, y: drawY, w: drawW, h: drawH });
         }
 
         if (progressFill) progressFill.style.width = "100%";
@@ -2656,6 +3057,8 @@ async function exportarPPTXEditavel() {
     const titleText = document.getElementById("export-title-text");
     const progressFill = document.getElementById("export-progress-fill");
     const modoAnterior = modoEdicao;
+
+    sincronizarMetadadosOnePageDoDOM();
     
     exportOverlay.style.display = "flex";
     if (titleText) titleText.textContent = "Gerando PPTX Editável Perfeito...";
@@ -2681,11 +3084,21 @@ async function exportarPPTXEditavel() {
     }
     window.scrollTo(0, 0);
     
-    const pres = new PptxGenJS();
-    pres.layout = "LAYOUT_16x9";
-    
     const dadosFiltrados = obterDadosFiltrados();
     const TOTAL_SLIDES = 5 + dadosFiltrados.length;
+
+    let onePageHeight = 720;
+    const onePageOriginal = document.querySelector(".slide-container[data-index='2']");
+    if (onePageOriginal) {
+        const measuredOnePage = await criarOnePageParaExportacao(onePageOriginal);
+        onePageHeight = measuredOnePage.height;
+        measuredOnePage.cleanup();
+    }
+
+    const deckHeightInches = Math.max(5.625, onePageHeight / 128);
+    const pres = new PptxGenJS();
+    pres.defineLayout({ name: "ONEPAGE_RESPONSIVE", width: 10, height: deckHeightInches });
+    pres.layout = "ONEPAGE_RESPONSIVE";
     
     let promiseSequence = Promise.resolve();
     
@@ -2747,12 +3160,12 @@ async function exportarPPTXEditavel() {
                     }).then(canvas => {
                         const imgData = canvas.toDataURL("image/jpeg", 0.95);
                         
-                        // Mantém a escala 128 px = 1 polegada; páginas mais altas
+                        // Mantém a escala 128 px = 1 polegada. Páginas mais altas
                         // crescem sem reduzir fontes, colunas ou conteúdo.
                         const drawW = 10;
-                        const drawH = 5.625;
+                        const drawH = exportVersion.height / 128;
                         const drawX = 0;
-                        const drawY = 0;
+                        const drawY = (deckHeightInches - drawH) / 2;
 
 const contRect = slideElem.getBoundingClientRect();
 const scaleUniform = drawW / contRect.width; // ex: 10 / 1280
@@ -2799,17 +3212,64 @@ const scaleUniform = drawW / contRect.width; // ex: 10 / 1280
                             };
                             
                             if(style.fontWeight > 500) coords.bold = true;
-                            
-                            let text = el.innerText || el.textContent;
-                            text = text.trim();
-                            if(!text) return;
+
+                            // O editor grava estilos em elementos filhos (span/font).
+                            // Converte cada trecho em um run do PptxGenJS para manter
+                            // cor, tamanho e ênfases aplicadas individualmente.
+                            const textRuns = [];
+                            function appendRun(text, runStyle) {
+                                if (!text) return;
+                                const normalizedText = text.replace(/\u00a0/g, " ");
+                                if (!normalizedText) return;
+
+                                const runOptions = {
+                                    color: rgbToHex(runStyle.color) || defaultColor,
+                                    fontFace: runStyle.fontFamily.includes("Outfit") ? "Outfit" : defaultFont,
+                                    fontSize: parseFloat(runStyle.fontSize) * 0.75
+                                };
+                                const numericWeight = parseInt(runStyle.fontWeight, 10);
+                                if (runStyle.fontWeight === "bold" || (!Number.isNaN(numericWeight) && numericWeight > 500)) {
+                                    runOptions.bold = true;
+                                }
+                                if (runStyle.fontStyle === "italic") runOptions.italic = true;
+                                if (runStyle.textDecorationLine?.includes("underline")) runOptions.underline = true;
+
+                                const previous = textRuns[textRuns.length - 1];
+                                if (previous && JSON.stringify(previous.options) === JSON.stringify(runOptions)) {
+                                    previous.text += normalizedText;
+                                } else {
+                                    textRuns.push({ text: normalizedText, options: runOptions });
+                                }
+                            }
+
+                            function walkRichText(node) {
+                                if (node.nodeType === Node.TEXT_NODE) {
+                                    appendRun(node.nodeValue, window.getComputedStyle(node.parentElement || el));
+                                    return;
+                                }
+                                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                                if (node.matches(".bullet-actions, .edit-only-inline, .edit-only-block")) return;
+                                if (window.getComputedStyle(node).display === "none") return;
+                                if (node.tagName === "BR") {
+                                    appendRun("\n", window.getComputedStyle(node.parentElement || el));
+                                    return;
+                                }
+                                Array.from(node.childNodes).forEach(walkRichText);
+                            }
+
+                            walkRichText(el);
+                            if (!textRuns.length) return;
+                            textRuns[0].text = textRuns[0].text.replace(/^\s+/, "");
+                            textRuns[textRuns.length - 1].text = textRuns[textRuns.length - 1].text.replace(/\s+$/, "");
+                            const richText = textRuns.filter(run => run.text.length > 0);
+                            if (!richText.length) return;
                             
                             if (isLi) {
                                 coords.bullet = true;
                                 coords.align = "left";
                             }
                             
-                            s.addText(text, coords);
+                            s.addText(richText, coords);
                         }
                         
                         if (sIdx === 1) {
@@ -2822,12 +3282,12 @@ const scaleUniform = drawW / contRect.width; // ex: 10 / 1280
                             cloneTextNode(slideElem.querySelector("#slide2-header-subtitle"), "00B080", "Inter");
                             
                             slideElem.querySelectorAll("#list-destaques li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
-slideElem.querySelectorAll("#list-atencao li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
-slideElem.querySelectorAll("#list-passos li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
-slideElem.querySelectorAll("#list-pendencias-mro li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
-slideElem.querySelectorAll("#list-pendencias-cliente li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
+                            slideElem.querySelectorAll("#list-atencao li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
+                            slideElem.querySelectorAll("#list-passos li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
+                            slideElem.querySelectorAll("#list-pendencias-mro li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
+                            slideElem.querySelectorAll("#list-pendencias-cliente li").forEach(li => cloneTextNode(li, "001A70", "Inter", true));
                             cloneTextNode(slideElem.querySelector(".sla-inline-title"), "0F2B5C", "Outfit");
-slideElem.querySelectorAll("#table-slas th:not(.skip-clone), #table-slas td .editable-text").forEach(cell => {
+                            slideElem.querySelectorAll("#table-slas th:not(.skip-clone), #table-slas td .editable-text").forEach(cell => {
                                 cloneTextNode(cell, "0F2B5C", "Inter");
                             });
                         }
@@ -3067,7 +3527,8 @@ window.carregarDoSupabaseERenderizar = async function() {
             const dados = await fetchDashboardData(AppState.contrato, compBackend);
             
             if (dados && dados.excelData && dados.excelData.length > 0) {
-                AppState.excelData = dados.excelData;
+                AppState.excelData = preservarInformacoesComplementaresNosRegistros(dados.excelData);
+                atualizarPeriodoPelaCompetencia(dados.competencia);
                 Object.assign(AppState, dados.comentarios);
                 salvarDados(); // Cache local
                 console.log("Dados atualizados com sucesso via Supabase.");

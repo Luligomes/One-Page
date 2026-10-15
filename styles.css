@@ -822,10 +822,25 @@ body {
     padding-bottom: 50px; /* Room for "+ Adicionar linha" button */
 }
 
+/*
+ * O card de SLAs recebe altura flexível junto aos demais cards do One Page.
+ * Transformamos seu conteúdo em duas faixas: a tabela ocupa todo o espaço
+ * disponível e a legenda permanece no rodapé. Como a altura da tabela passa
+ * a acompanhar o card, o layout nativo de tabelas distribui o espaço extra
+ * entre as linhas sem depender de uma altura fixa ou da quantidade de SLAs.
+ */
+.card-slas .card-content-table {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: clamp(8px, 1.2vh, 14px);
+}
+
 .sla-table {
     width: 100%;
+    height: 100%;
     border-collapse: collapse;
-    margin-bottom: 12px;
+    table-layout: fixed;
+    margin: 0;
 }
 
 .sla-table th {
@@ -835,12 +850,12 @@ body {
     font-size: 11.5px;
     color: #0f2b5c;
     text-transform: none; /* No uppercase */
-    padding: 8px 10px;
+    padding: clamp(8px, 1.1vh, 12px) 10px;
     border-bottom: 1.5px solid #cbd5e1;
 }
 
 .sla-table td {
-    padding: 10px 10px;
+    padding: clamp(10px, 1.6vh, 16px) 10px;
     font-size: 11.5px;
     border-bottom: 1px solid #cbd5e1;
     color: var(--text-dark);
@@ -993,10 +1008,11 @@ body {
 
 .table-legend {
     display: flex;
+    flex-wrap: wrap;
     gap: 16px;
     font-size: 9px;
     color: var(--text-muted);
-    padding: 0 10px;
+    padding: 0 10px 2px;
 }
 
 .legend-item {
@@ -1909,6 +1925,60 @@ body {
     overflow: visible;
 }
 
+/*
+ * One Page responsivo para exportação.
+ *
+ * O clone de exportação cresce com o conteúdo. Nenhuma regra deste bloco
+ * altera font-size ou color: estilos personalizados continuam sendo a fonte
+ * de verdade tanto na captura quanto no PowerPoint editável.
+ */
+.onepage-export-render-stage {
+    position: fixed;
+    top: 0;
+    left: -100000px;
+    width: 1280px;
+    min-height: 720px;
+    overflow: visible;
+    pointer-events: none;
+    background: #ffffff;
+}
+
+#slide-2.onepage-export-layout {
+    display: flex !important;
+    width: 1280px;
+    height: auto !important;
+    min-height: 720px !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+#slide-2.onepage-export-layout .onepage-grid {
+    flex: 1 0 auto;
+    min-height: min-content;
+    align-items: stretch;
+}
+
+#slide-2.onepage-export-layout .onepage-col,
+#slide-2.onepage-export-layout .cards-row {
+    min-height: min-content;
+    align-items: stretch;
+}
+
+#slide-2.onepage-export-layout .card,
+#slide-2.onepage-export-layout .card-content,
+#slide-2.onepage-export-layout .card-content-table {
+    min-height: min-content;
+    overflow: visible;
+}
+
+#slide-2.onepage-export-layout .card {
+    flex-basis: auto;
+}
+
+#slide-2.onepage-export-layout .editable-list {
+    padding-bottom: 0;
+}
+
 .capturing .editable-text {
     border-color: transparent !important;
     background-color: transparent !important;
@@ -2242,29 +2312,43 @@ tr.row-status-red [data-field="atual"], tr.row-status-red [data-field="m1"], tr.
 .hide-text-for-capture .sla-table th,
 .hide-text-for-capture .sla-table td {
     color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+}
+
+/* Formatações inline têm cor própria e não herdam o transparente do pai. */
+.hide-text-for-capture .capa-subtitle *,
+.hide-text-for-capture .capa-title *,
+.hide-text-for-capture .capa-periodo *,
+.hide-text-for-capture .slide-header-contrato *,
+.hide-text-for-capture .slide-header-title *,
+.hide-text-for-capture .slide-header-subtitle *,
+.hide-text-for-capture .editable-list li *,
+.hide-text-for-capture .sla-table th *,
+.hide-text-for-capture .sla-table td * {
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
 }
 
 
-/* Classes de compactacao dinamica para caber no 16:9 */
-.compact-1 .sla-table td, .compact-1 .sla-table th { padding: 4px 8px !important; font-size: 10px !important; }
+/* Classes de compactação: ajustam somente espaços, nunca texto do usuário. */
+.compact-1 .sla-table td, .compact-1 .sla-table th { padding: 4px 8px !important; }
 .compact-1 .card { padding: 8px 12px !important; padding-bottom: 15px !important; }
-.compact-1 .editable-list li { font-size: 10.5px !important; margin-bottom: 3px !important; }
+.compact-1 .editable-list li { margin-bottom: 3px !important; }
 .compact-1 .onepage-grid { gap: 8px !important; }
 .compact-1 .slide-header { margin-bottom: 12px !important; }
 
-.compact-2 .sla-table td, .compact-2 .sla-table th { padding: 2px 6px !important; font-size: 9px !important; }
+.compact-2 .sla-table td, .compact-2 .sla-table th { padding: 2px 6px !important; }
 .compact-2 .card { padding: 6px 10px !important; padding-bottom: 10px !important; }
-.compact-2 .editable-list li { font-size: 9.5px !important; margin-bottom: 2px !important; }
+.compact-2 .editable-list li { margin-bottom: 2px !important; }
 .compact-2 .onepage-grid { gap: 6px !important; }
 .compact-2 .card-title-bar { margin-bottom: 8px !important; }
 .compact-2 .slide-header { margin-bottom: 8px !important; }
 
-.compact-3 .sla-table td, .compact-3 .sla-table th { padding: 1px 4px !important; font-size: 8.5px !important; }
+.compact-3 .sla-table td, .compact-3 .sla-table th { padding: 1px 4px !important; }
 .compact-3 .card { padding: 4px 8px !important; padding-bottom: 6px !important; border-radius: 8px !important; }
-.compact-3 .editable-list li { font-size: 8.5px !important; margin-bottom: 1px !important; }
+.compact-3 .editable-list li { margin-bottom: 1px !important; }
 .compact-3 .onepage-grid { gap: 4px !important; }
 .compact-3 .card-title-bar { margin-bottom: 4px !important; }
-.compact-3 .card-title-text-wrapper h4 { font-size: 11px !important; }
 .compact-3 .slide-header { margin-bottom: 4px !important; }
 
 /* Arrow Colors */

@@ -69,6 +69,59 @@ function obterUltimaCompetenciaImportada(records) {
 let pendingImportPayload = [];
 let pendingImportSummary = {};
 
+function normalizarVersaoSupabase(row) {
+    const criadaEm = row.created_at ? new Date(row.created_at) : new Date();
+    const data = criadaEm.toLocaleDateString('pt-BR');
+    const hora = criadaEm.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return {
+        id: row.id,
+        nome: row.nome,
+        contrato: row.contrato,
+        periodo: row.periodo,
+        dataHora: `${data} | ${hora}`,
+        createdAt: row.created_at,
+        dados: row.dados
+    };
+}
+
+window.listarVersoesContratoSupabase = async function(contrato) {
+    if (!window.supabaseClientObj) {
+        throw new Error('Supabase não está configurado nesta publicação.');
+    }
+    if (!contrato) return [];
+
+    const { data, error } = await window.supabaseClientObj
+        .from('versoes_contrato')
+        .select('id, contrato, nome, periodo, dados, created_at')
+        .eq('contrato', contrato)
+        .order('created_at', { ascending: false });
+
+    if (error) throw new Error(`Não foi possível consultar as versões no Supabase: ${error.message}`);
+    return (data || []).map(normalizarVersaoSupabase);
+};
+
+window.salvarVersaoContratoSupabase = async function(versao) {
+    if (!window.supabaseClientObj) {
+        throw new Error('Supabase não está configurado nesta publicação.');
+    }
+
+    const payload = {
+        contrato: versao.contrato,
+        nome: versao.nome,
+        periodo: versao.periodo || null,
+        dados: versao.dados
+    };
+
+    const { data, error } = await window.supabaseClientObj
+        .from('versoes_contrato')
+        .insert(payload)
+        .select('id, contrato, nome, periodo, dados, created_at')
+        .single();
+
+    if (error) throw new Error(`Não foi possível salvar a versão no Supabase: ${error.message}`);
+    return normalizarVersaoSupabase(data);
+};
+
 async function validateAndPreviewExcel(matrix) {
     if (!matrix || matrix.length < 2) {
         alert("O arquivo não possui dados suficientes.");
@@ -239,7 +292,8 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             await executarImportacaoSupabase(pendingImportPayload);
         } catch (e) {
-            alert("Erro na gravação do Supabase: " + e.message);
+            console.error("Importação interrompida antes da conclusão:", e);
+            alert("Não foi possível concluir a importação.\n\n" + e.message);
             btnConfirm.disabled = false;
             btnConfirm.textContent = "Confirmar, salvar e carregar slides";
             return;
@@ -267,8 +321,21 @@ async function executarImportacaoSupabase(records) {
     const supabase = window.supabaseClientObj;
     const uniqueBy = (items, key) => [...new Map(items.map(item => [key(item), item])).values()];
     const failOnError = (error, label) => {
-        if (error) throw new Error(`Erro ao preparar ${label}: ${error.message}`);
+        if (!error) return;
+        if (typeof window.formatarErroSupabase === 'function') {
+            throw window.formatarErroSupabase(error, `a preparação de ${label}`);
+        }
+        throw new Error(`Erro ao preparar ${label}: ${error.message}`);
     };
+
+    // Valida conexão, credenciais e permissão de leitura antes da primeira
+    // escrita. Uma indisponibilidade de rede/configuração não deve deixar a
+    // importação parcialmente gravada em tabelas relacionadas.
+    const { error: connectionError } = await supabase
+        .from('clientes')
+        .select('id', { head: true, count: 'exact' })
+        .limit(1);
+    failOnError(connectionError, 'conexão com clientes');
 
     // A versão anterior aguardava até 10 chamadas de rede por linha. Em planilhas
     // grandes isso deixava a tela em "Salvando..." por muitos minutos. Agora cada
@@ -324,7 +391,12 @@ async function executarImportacaoSupabase(records) {
             fatosToUpsert, 
             { onConflict: 'localidade_id, cliente_id, indicador_id, competencia' }
         );
-        if (errFato) throw new Error("Erro no upsert em lote: " + errFato.message);
+        if (errFato) {
+            if (typeof window.formatarErroSupabase === 'function') {
+                throw window.formatarErroSupabase(errFato, 'a gravação dos indicadores');
+            }
+            throw new Error("Erro no upsert em lote: " + errFato.message);
+        }
     }
 
     const { error: importError } = await supabase.from('importacoes').insert({
@@ -459,7 +531,20 @@ async function fetchDashboardData(clienteNome, competencia) {
         const { data: cliente } = await window.supabaseClientObj.from('clientes').select('id').eq('nome_cliente', clienteNome).single();
         if (!cliente) return null;
 
-        const ano = competencia.split('/')[1];
+        // A competência exibida precisa refletir o último dado efetivamente
+        // importado para o contrato — e não o período que ficou selecionado
+        // na tela antes da troca de filtro.
+        const { data: competencias, error: competenciasError } = await window.supabaseClientObj
+            .from('indicadores_competencia')
+            .select('competencia')
+            .eq('cliente_id', cliente.id);
+        if (competenciasError) throw competenciasError;
+
+        const competenciaMaisRecente = obterUltimaCompetenciaImportada(competencias || []);
+        const competenciaSelecionada = competenciaMaisRecente || competencia;
+        if (!competenciaSelecionada) return null;
+
+        const ano = competenciaSelecionada.split('/')[1];
         
         const { data: indicadoresFato } = await window.supabaseClientObj.from('indicadores_competencia')
             .select('*, indicadores(nome_indicador, grupos(nome_grupo, pilares(nome_pilar))), localidades(nome_localidade)')
@@ -469,11 +554,14 @@ async function fetchDashboardData(clienteNome, competencia) {
         const { data: comentarios } = await window.supabaseClientObj.from('comentarios')
             .select('*')
             .eq('contrato_id', cliente.id)
-            .eq('competencia', competencia)
+            .eq('competencia', competenciaSelecionada)
             .order('categoria', { ascending: true })
             .order('ordem', { ascending: true });
 
-        return processarDadosSupabase(indicadoresFato, comentarios, competencia);
+        return {
+            ...processarDadosSupabase(indicadoresFato, comentarios, competenciaSelecionada),
+            competencia: competenciaSelecionada
+        };
     } catch (e) {
         console.error("Erro ao buscar dados do Supabase:", e);
         return null;
