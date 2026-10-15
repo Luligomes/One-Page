@@ -465,6 +465,7 @@ function renderizarDadosGlobais() {
     if (typeof renderKanbanCards === 'function') renderKanbanCards();
 }
 
+<<<<<<< HEAD
 function obterHtmlEditavelOuFallback(element, fallback) {
     if (!element || !element.textContent.trim()) return fallback;
     return element.innerHTML;
@@ -478,12 +479,20 @@ function sincronizarMetadadosOnePageDoDOM() {
         ["slide2-header-contrato", "slide2HeaderContrato", AppState.contrato || "CBO"],
         ["slide2-header-title", "slide2HeaderTitle", `One-Page Executivo - ${AppState.contrato}`],
         ["slide2-header-subtitle", "slide2HeaderSubtitle", `${AppState.contrato} | ${AppState.periodo}`],
+=======
+// Mantém todos os conteúdos editáveis do One Page sincronizados com o estado,
+// incluindo o HTML inline criado pela barra de cor e tamanho da fonte. Assim,
+// a renderização iniciada pela exportação não reduz o conteúdo a texto simples.
+function sincronizarMetadadosOnePageDoDOM() {
+    [
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
         ["txt-resp-mro", "respMro", "Nome"],
         ["txt-resp-cliente", "respCliente", "Nome"],
         ["txt-prox-reuniao", "proxReuniao", "dd/mm/aaaa"]
     ].forEach(([elementId, stateKey, fallback]) => {
         const element = document.getElementById(elementId);
         if (!element) return;
+<<<<<<< HEAD
         AppState[stateKey] = obterHtmlEditavelOuFallback(element, fallback);
     });
 
@@ -508,6 +517,36 @@ function sincronizarMetadadosOnePageDoDOM() {
         if (!item) return;
         row.querySelectorAll(".editable-text[data-field]").forEach(element => {
             item[element.dataset.field] = obterHtmlEditavelOuFallback(element, "-");
+=======
+        AppState[stateKey] = element.innerHTML.trim() || fallback;
+    });
+
+    [
+        ["slide2-header-contrato", "slide2HeaderContrato"],
+        ["slide2-header-title", "slide2HeaderTitle"],
+        ["slide2-header-subtitle", "slide2HeaderSubtitle"]
+    ].forEach(([elementId, stateKey]) => {
+        const element = document.getElementById(elementId);
+        if (element) AppState[stateKey] = element.innerHTML.trim();
+    });
+
+    document.querySelectorAll("#slide-2 .editable-list[data-key]").forEach(listEl => {
+        const values = Array.from(listEl.querySelectorAll(":scope > li .onepage-list-text"))
+            .map(element => element.innerHTML.trim())
+            .filter(value => value !== "");
+        syncEditableList(listEl.dataset.key, values);
+        editableListSources.set(listEl.id, values);
+    });
+
+    document.querySelectorAll("#table-slas tbody tr").forEach((row, index) => {
+        const item = AppState.slas?.[index];
+        if (!item) return;
+        const editableValues = row.querySelectorAll("td .editable-text");
+        if (editableValues[0]) item.sla = editableValues[0].innerHTML.trim() || "-";
+        ["meta", "atual", "m1", "acumulado"].forEach((field, fieldIndex) => {
+            const element = editableValues[fieldIndex + 1];
+            if (element) item[field] = element.innerHTML.trim() || "-";
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
         });
     });
 }
@@ -524,6 +563,7 @@ function configurarEventosGerais() {
     }
 
     [
+<<<<<<< HEAD
         "slide2-header-contrato",
         "slide2-header-title",
         "slide2-header-subtitle",
@@ -531,6 +571,21 @@ function configurarEventosGerais() {
         "txt-resp-cliente",
         "txt-prox-reuniao"
     ].forEach(elementId => {
+=======
+        ["slide2-header-contrato", "slide2HeaderContrato"],
+        ["slide2-header-title", "slide2HeaderTitle"],
+        ["slide2-header-subtitle", "slide2HeaderSubtitle"]
+    ].forEach(([elementId, stateKey]) => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        element.addEventListener("blur", () => {
+            AppState[stateKey] = element.innerHTML.trim();
+            salvarDados();
+        });
+    });
+
+    ["txt-resp-mro", "txt-resp-cliente", "txt-prox-reuniao"].forEach(elementId => {
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
         const element = document.getElementById(elementId);
         if (!element) return;
 
@@ -794,6 +849,7 @@ async function atualizarDropdownVersoes() {
     }
 }
 
+<<<<<<< HEAD
 function copiarParaVersao(valor) {
     return valor === undefined ? undefined : JSON.parse(JSON.stringify(valor));
 }
@@ -967,11 +1023,15 @@ function restaurarInformacoesComplementaresDaVersao(dadosVersao) {
 
 // Salva apenas conteúdo editorial. Os indicadores importados continuam sendo
 // controlados pela base mais recente no Supabase.
+=======
+// Salva uma nova versão acumulativa do dashboard atual
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
 async function salvarNovaVersao() {
     if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
     }
     sincronizarMetadadosOnePageDoDOM();
+<<<<<<< HEAD
     
     const defaultName = AppState.contrato || "Versão Sem Nome";
     const nomeVersaoInput = prompt("Digite o nome ou identificador para esta versão:", defaultName);
@@ -996,12 +1056,67 @@ async function salvarNovaVersao() {
         }
     };
     
+=======
+    
+    const defaultName = AppState.contrato || "Versão Sem Nome";
+    const nomeVersaoInput = prompt("Digite o nome ou identificador para esta versão:", defaultName);
+    if (nomeVersaoInput === null) return;
+    
+    const nomeVersao = nomeVersaoInput.trim() || defaultName;
+    
+    const snapshot = {
+        contrato: AppState.contrato,
+        periodo: AppState.periodo,
+        respMro: AppState.respMro,
+        respCliente: AppState.respCliente,
+        proxReuniao: AppState.proxReuniao,
+        destaques: [...AppState.destaques],
+        atencoes: [...AppState.atencoes],
+        passos: [...AppState.passos],
+        pendenciasMro: [...AppState.pendenciasMro],
+        pendenciasCliente: [...AppState.pendenciasCliente],
+        slas: JSON.parse(JSON.stringify(AppState.slas)),
+        indicadores: JSON.parse(JSON.stringify(AppState.indicadores)),
+        reunioesExecutivas: JSON.parse(JSON.stringify(AppState.reunioesExecutivas)),
+        slide11Participants: [...AppState.slide11Participants],
+        excelData: AppState.excelData ? JSON.parse(JSON.stringify(AppState.excelData)) : null,
+        dadosContratos: AppState.dadosContratos ? JSON.parse(JSON.stringify(AppState.dadosContratos)) : {},
+        anoAnterior: AppState.anoAnterior,
+        anoAtual: AppState.anoAtual
+    };
+    
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
     const versaoParaSalvar = {
         nome: nomeVersao,
         contrato: AppState.contrato,
         periodo: AppState.periodo,
         dados: snapshot
     };
+<<<<<<< HEAD
+
+    try {
+        if (typeof window.salvarVersaoContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        const novaVersao = await window.salvarVersaoContratoSupabase(versaoParaSalvar);
+        AppState.historicoVersoes = AppState.historicoVersoes || [];
+        AppState.historicoVersoes = [
+            ...AppState.historicoVersoes.filter(versao => versao.id !== novaVersao.id),
+            novaVersao
+        ];
+        salvarDados();
+        await atualizarDropdownVersoes();
+        selectVersionsContract.value = novaVersao.id;
+        mostrarNotificacao(`Versão "${nomeVersao}" salva com sucesso no Supabase!`, "success");
+        return novaVersao;
+    } catch (error) {
+        console.error("Erro ao salvar versão no Supabase:", error);
+        alert(error.message);
+        return null;
+    }
+}
+=======
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
 
     try {
         if (typeof window.salvarVersaoContratoSupabase !== "function") {
@@ -1319,14 +1434,22 @@ function sincronizarValoresGrafico(ind) {
             sourceRows.push(newRow);
         }
     }
+<<<<<<< HEAD
     
     salvarDados();
 }
 
+=======
+    
+    salvarDados();
+}
+
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
 // Filtra e retorna os indicadores da planilha por referência direta. Quando
 // "todos" os contratos estão selecionados, cada contrato mantém seu próprio
 // gráfico mesmo que possua um indicador com o mesmo nome.
 function obterDadosFiltrados() {
+<<<<<<< HEAD
     const contratoSel = filterContrato.value;
     const localidadeSel = filterLocalidade.value;
     
@@ -1338,6 +1461,19 @@ function obterDadosFiltrados() {
             return matchContrato && matchLocalidade;
         });
         
+=======
+    const contratoSel = filterContrato.value;
+    const localidadeSel = filterLocalidade.value;
+    
+    // Se tivermos planilha de Excel, filtramos dela e mantemos os objetos originais por referência
+    if (AppState.excelData && AppState.excelData.length > 0) {
+        const filteredRaw = AppState.excelData.filter(row => {
+            const matchContrato = contratoSel === "todos" || row.contrato === contratoSel;
+            const matchLocalidade = localidadeSel === "todos" || row.localidade === localidadeSel;
+            return matchContrato && matchLocalidade;
+        });
+        
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
         // A identidade do gráfico é contrato + indicador. Localidades continuam
         // consolidadas quando o filtro de localidade estiver em "todos".
         const grouped = {};
@@ -1840,7 +1976,11 @@ function renderList(listId, dataArray) {
         text.contentEditable = modoEdicao ? "true" : "false";
         text.innerHTML = item;
         text.addEventListener("blur", () => {
+<<<<<<< HEAD
             values[index] = obterHtmlEditavelOuFallback(text, "Novo item");
+=======
+            values[index] = text.innerHTML.trim() || "Novo item";
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
             syncEditableList(key, values);
             salvarDados();
             autoFitCompact();
@@ -1898,7 +2038,11 @@ function renderTabelaSLAs() {
         nomeText.dataset.field = "sla";
         nomeText.contentEditable = modoEdicao ? "true" : "false";
         nomeText.innerHTML = item.sla || "";
+<<<<<<< HEAD
         nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.innerHTML, nomeText.textContent));
+=======
+        nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.innerHTML));
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
         nome.appendChild(nomeText);
         row.appendChild(nome);
 
@@ -1915,7 +2059,11 @@ function renderTabelaSLAs() {
             valueText.dataset.field = field;
             valueText.contentEditable = modoEdicao ? "true" : "false";
             valueText.innerHTML = value ?? "-";
+<<<<<<< HEAD
             valueText.addEventListener("blur", () => window.updateSlaField(index, field, valueText.innerHTML, valueText.textContent));
+=======
+            valueText.addEventListener("blur", () => window.updateSlaField(index, field, valueText.innerHTML));
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
             cell.appendChild(valueText);
             const hasUpTrend = typeof item.trendArrow === "string" && item.trendArrow.includes("trend-up");
             const hasDownTrend = typeof item.trendArrow === "string" && item.trendArrow.includes("trend-down");
@@ -2742,6 +2890,7 @@ function exportarPDFLegado() {
 }
 
 async function criarOnePageParaExportacao(slideOriginal) {
+<<<<<<< HEAD
     // A exportação usa um clone isolado. Assim, os cards podem crescer e se
     // redistribuir sem alterar a tela de edição nem sobrescrever estilos inline
     // (fonte, tamanho, cor e ênfases) escolhidos pelo usuário.
@@ -2764,6 +2913,14 @@ async function criarOnePageParaExportacao(slideOriginal) {
     // O texto padrão da próxima reunião é apenas uma orientação de edição e
     // não deve aparecer no arquivo quando nenhuma data foi informada.
     const proxReuniao = exportSlide.querySelector("#txt-prox-reuniao");
+=======
+    // Captura o próprio componente já renderizado fora do modo de edição.
+    // Não há clone nem CSS alternativo para o One Page.
+    // O texto padrão da próxima reunião é apenas uma orientação de edição e
+    // não deve aparecer no arquivo quando nenhuma data foi informada.
+    const proxReuniao = slideOriginal.querySelector("#txt-prox-reuniao");
+    const proxReuniaoHtmlOriginal = proxReuniao ? proxReuniao.innerHTML : null;
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
     const proxReuniaoTexto = proxReuniao ? proxReuniao.textContent.trim() : "";
     const ocultarPlaceholderProximaReuniao = proxReuniao && (
         proxReuniaoTexto === "" || /^dd\s*\/\s*mm\s*\/\s*(?:aa|aaaa)$/i.test(proxReuniaoTexto)
@@ -2773,7 +2930,14 @@ async function criarOnePageParaExportacao(slideOriginal) {
         proxReuniao.innerHTML = "";
     }
 
+<<<<<<< HEAD
     if (document.fonts?.ready) await document.fonts.ready;
+=======
+    // A rotina responsiva existente precisa rodar com o slide visível;
+    // quando executada com ele oculto, a altura medida é zero.
+    if (typeof autoFitCompact === "function") autoFitCompact();
+    await new Promise(resolve => setTimeout(resolve, 40));
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     // Testa proporções de coluna e mantém a que exige menos altura. A fonte
@@ -2817,10 +2981,19 @@ async function criarOnePageParaExportacao(slideOriginal) {
     exportSlide.style.minHeight = `${captureHeight}px`;
 
     return {
+<<<<<<< HEAD
         element: exportSlide,
         height: captureHeight,
         cleanup() {
             renderStage.remove();
+=======
+        element: slideOriginal,
+        height: 720,
+        cleanup() {
+            if (ocultarPlaceholderProximaReuniao && proxReuniaoHtmlOriginal !== null) {
+                proxReuniao.innerHTML = proxReuniaoHtmlOriginal;
+            }
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
         }
     };
 }
@@ -3212,6 +3385,7 @@ const scaleUniform = drawW / contRect.width; // ex: 10 / 1280
                             };
                             
                             if(style.fontWeight > 500) coords.bold = true;
+<<<<<<< HEAD
 
                             // O editor grava estilos em elementos filhos (span/font).
                             // Converte cada trecho em um run do PptxGenJS para manter
@@ -3263,13 +3437,60 @@ const scaleUniform = drawW / contRect.width; // ex: 10 / 1280
                             textRuns[textRuns.length - 1].text = textRuns[textRuns.length - 1].text.replace(/\s+$/, "");
                             const richText = textRuns.filter(run => run.text.length > 0);
                             if (!richText.length) return;
+=======
+                            
+                            let text = el.innerText || el.textContent;
+                            text = text.trim();
+                            if(!text) return;
+
+                            // O editor pode aplicar estilos em spans/fontes internos.
+                            // Cada trecho vira um run do PowerPoint com seu próprio
+                            // tamanho e cor, em vez de herdar o padrão do elemento pai.
+                            const richTextRuns = [];
+                            const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                            let textNode;
+                            while ((textNode = walker.nextNode())) {
+                                const parent = textNode.parentElement;
+                                if (!parent || parent.closest(".bullet-actions, .edit-only-inline, .edit-only-block")) continue;
+
+                                const runText = textNode.nodeValue || "";
+                                if (!runText) continue;
+
+                                const runStyle = window.getComputedStyle(parent);
+                                if (runStyle.display === "none" || runStyle.visibility === "hidden") continue;
+
+                                const runFontSizePx = parseFloat(runStyle.fontSize);
+                                const runOptions = {
+                                    color: rgbToHex(runStyle.color) || defaultColor,
+                                    fontFace: runStyle.fontFamily.includes("Outfit") ? "Outfit" : defaultFont
+                                };
+                                if (!Number.isNaN(runFontSizePx)) runOptions.fontSize = runFontSizePx * 0.75;
+                                if (parseInt(runStyle.fontWeight, 10) > 500 || runStyle.fontWeight === "bold") runOptions.bold = true;
+                                if (runStyle.fontStyle === "italic") runOptions.italic = true;
+                                if (runStyle.textDecorationLine?.includes("underline")) runOptions.underline = true;
+
+                                richTextRuns.push({ text: runText, options: runOptions });
+                            }
+
+                            if (richTextRuns.length > 0) {
+                                richTextRuns[0].text = richTextRuns[0].text.replace(/^\s+/, "");
+                                richTextRuns[richTextRuns.length - 1].text = richTextRuns[richTextRuns.length - 1].text.replace(/\s+$/, "");
+                            }
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
                             
                             if (isLi) {
                                 coords.bullet = true;
                                 coords.align = "left";
                             }
                             
+<<<<<<< HEAD
                             s.addText(richText, coords);
+=======
+                            const textForPowerPoint = richTextRuns.some(run => run.text.length > 0)
+                                ? richTextRuns.filter(run => run.text.length > 0)
+                                : text;
+                            s.addText(textForPowerPoint, coords);
+>>>>>>> e1c5f9702114c9d67aea43b3e58cc1e96ecd6f79
                         }
                         
                         if (sIdx === 1) {
