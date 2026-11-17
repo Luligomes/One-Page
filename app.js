@@ -385,24 +385,24 @@ document.addEventListener("keydown", event => {
 
 function salvarDados() {
     try {
-        // Sem login: os dados permanecem somente neste navegador/dispositivo.
-        localStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+        // O Supabase é a fonte oficial; este cache dura somente a sessão.
+        sessionStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
     } catch (error) {
-        console.warn("Não foi possível salvar os dados no navegador:", error);
+        console.warn("Não foi possível atualizar o cache local:", error);
         if (typeof mostrarNotificacao === "function") {
-            mostrarNotificacao("O armazenamento deste navegador atingiu o limite.", "warning");
+            mostrarNotificacao("O cache desta sessão atingiu o limite. Salve uma versão no Supabase.", "warning");
         }
     }
 }
 
 function carregarDados() {
-    const saved = localStorage.getItem("MRO_Boletim_Dados") || sessionStorage.getItem("MRO_Boletim_Dados");
+    const saved = sessionStorage.getItem("MRO_Boletim_Dados") || localStorage.getItem("MRO_Boletim_Dados");
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
             AppState = { ...DADOS_PADRAO, ...parsed };
-            localStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
-            sessionStorage.removeItem("MRO_Boletim_Dados");
+            sessionStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+            localStorage.removeItem("MRO_Boletim_Dados");
             if (!AppState.indicadores) AppState.indicadores = DADOS_PADRAO.indicadores;
             
             if (AppState.excelData && Array.isArray(AppState.excelData) && AppState.excelData.length > 0) {
@@ -671,7 +671,7 @@ function configurarEventosGerais() {
     if (typeof btnUpdateCharts !== 'undefined' && btnUpdateCharts) {
         btnUpdateCharts.addEventListener("click", async () => {
             if (typeof processarConfiguracoesEAtualizar === 'function') processarConfiguracoesEAtualizar();
-            if (typeof window.carregarDoSupabaseERenderizar === 'function' && window.supabaseClientObj) {
+            if (typeof window.carregarDoSupabaseERenderizar === 'function') {
                 await window.carregarDoSupabaseERenderizar();
             } else {
                 if (typeof atualizarDashboardECartas === 'function') atualizarDashboardECartas();
@@ -814,7 +814,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-// O histórico é local e permanece somente neste navegador/dispositivo.
+// O Supabase é a fonte oficial do histórico; o AppState mantém somente um cache.
 let requisicaoVersoesAtual = 0;
 
 async function atualizarDropdownVersoes() {
@@ -826,10 +826,28 @@ async function atualizarDropdownVersoes() {
     const contratoAtivo = filterContrato.value;
     if (!contratoAtivo) return;
 
-    const versoesFiltradas = (AppState.historicoVersoes || [])
-        .filter(versao => versao.contrato === contratoAtivo)
-        .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-    if (numeroRequisicao !== requisicaoVersoesAtual || filterContrato.value !== contratoAtivo) return;
+    let versoesFiltradas = [];
+    try {
+        if (typeof window.listarVersoesContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        versoesFiltradas = await window.listarVersoesContratoSupabase(contratoAtivo);
+        if (numeroRequisicao !== requisicaoVersoesAtual || filterContrato.value !== contratoAtivo) return;
+
+        const outrosContratos = (AppState.historicoVersoes || [])
+            .filter(versao => versao.contrato !== contratoAtivo);
+        AppState.historicoVersoes = [...outrosContratos, ...versoesFiltradas];
+        salvarDados();
+    } catch (error) {
+        console.error("Erro ao carregar versões do Supabase:", error);
+        if (numeroRequisicao !== requisicaoVersoesAtual) return;
+        const optionErro = document.createElement("option");
+        optionErro.value = "";
+        optionErro.textContent = "Não foi possível carregar as versões";
+        optionErro.disabled = true;
+        selectVersionsContract.appendChild(optionErro);
+        return;
+    }
 
     versoesFiltradas.forEach(v => {
         const opt = document.createElement("option");
@@ -1014,7 +1032,7 @@ function restaurarInformacoesComplementaresDaVersao(dadosVersao) {
     sincronizarDadosContratoAtivo();
 }
 
-// Salva o conteúdo editorial no armazenamento local do navegador.
+// Salva o conteúdo editorial no Supabase para compartilhamento e persistência.
 async function salvarNovaVersao() {
     if (document.activeElement && typeof document.activeElement.blur === "function") {
         document.activeElement.blur();
@@ -1051,19 +1069,25 @@ async function salvarNovaVersao() {
         dados: snapshot
     };
 
-    const criadaEm = new Date();
-    const novaVersao = {
-        ...versaoParaSalvar,
-        id: globalThis.crypto?.randomUUID?.() || `local-${criadaEm.getTime()}`,
-        createdAt: criadaEm.toISOString(),
-        dataHora: `${criadaEm.toLocaleDateString("pt-BR")} | ${criadaEm.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
-    };
-    AppState.historicoVersoes = [...(AppState.historicoVersoes || []), novaVersao];
-    salvarDados();
-    await atualizarDropdownVersoes();
-    selectVersionsContract.value = novaVersao.id;
-    mostrarNotificacao(`Versão "${nomeVersao}" salva neste navegador!`, "success");
-    return novaVersao;
+    try {
+        if (typeof window.salvarVersaoContratoSupabase !== "function") {
+            throw new Error("Módulo de versões do Supabase não carregado.");
+        }
+        const novaVersao = await window.salvarVersaoContratoSupabase(versaoParaSalvar);
+        AppState.historicoVersoes = [
+            ...(AppState.historicoVersoes || []).filter(versao => versao.id !== novaVersao.id),
+            novaVersao
+        ];
+        salvarDados();
+        await atualizarDropdownVersoes();
+        selectVersionsContract.value = novaVersao.id;
+        mostrarNotificacao(`Versão "${nomeVersao}" salva com sucesso no Supabase!`, "success");
+        return novaVersao;
+    } catch (error) {
+        console.error("Erro ao salvar versão no Supabase:", error);
+        alert(error.message);
+        return null;
+    }
 }
 
 

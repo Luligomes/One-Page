@@ -288,21 +288,39 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnClose) btnClose.addEventListener("click", closeModal);
     
     if (btnConfirm) btnConfirm.addEventListener("click", async () => {
+        if (!window.supabaseClientObj) {
+            alert("Atenção: Supabase não está configurado. Verifique env.js.");
+            return;
+        }
+
         btnConfirm.disabled = true;
-        btnConfirm.textContent = "Carregando...";
+        btnConfirm.textContent = "Salvando...";
+
+        try {
+            await executarImportacaoSupabase(pendingImportPayload);
+        } catch (e) {
+            console.error("Importação interrompida antes da conclusão:", e);
+            alert("Não foi possível concluir a importação.\n\n" + e.message);
+            btnConfirm.disabled = false;
+            btnConfirm.textContent = "Confirmar, salvar e carregar slides";
+            return;
+        }
 
         try {
             if (typeof window.aplicarRegistrosImportados === 'function') {
                 window.aplicarRegistrosImportados(pendingImportPayload);
             }
-            alert("Importação concluída e salva neste navegador!");
+            alert("Importação concluída com sucesso no Supabase!");
             closeModal();
+            if (typeof window.carregarDoSupabaseERenderizar === 'function') {
+                await window.carregarDoSupabaseERenderizar();
+            }
         } catch (e) {
-            console.error("Erro ao atualizar a tela com os dados importados:", e);
-            alert("Não foi possível carregar os dados importados: " + e.message);
+            console.error("Dados salvos, mas houve erro ao atualizar a tela:", e);
+            alert("Os dados foram salvos no Supabase, mas a tela não pôde ser atualizada: " + e.message);
         } finally {
             btnConfirm.disabled = false;
-            btnConfirm.textContent = "Confirmar e carregar slides";
+            btnConfirm.textContent = "Confirmar, salvar e carregar slides";
         }
     });
 });

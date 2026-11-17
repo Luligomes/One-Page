@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Gerador interno de boletins executivos de clientes da MRO.">
     <meta name="referrer" content="strict-origin-when-cross-origin">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
     <title>Boletim Clientes — Gerador de One Page Executivo</title>
     <link rel="icon" href="mro_logo.png" type="image/png">
     
@@ -806,8 +806,11 @@
     </div>
 
     <!-- JS Principal -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8"></script>
+    <script src="env.js?v=20261005-active-project-1"></script>
     <script src="securityUtils.js?v=20261112-security-1"></script>
-    <script src="supabaseIntegration.js?v=20261117-local-storage-1"></script>
+    <script src="supabaseClient.js?v=20261117-no-login-1"></script>
+    <script src="supabaseIntegration.js?v=20261117-no-login-1"></script>
     
     <script src="app.js?v=20260918-onepage-responsive-export-1"></script>
 
@@ -819,7 +822,7 @@
             <button class="modal-close-btn" id="btn-close-import-modal" type="button" aria-label="Fechar validação da importação">&times;</button>
         </div>
         <div class="modal-body">
-            <p>Verifique o resultado da leitura da planilha antes de salvar os dados neste navegador.</p>
+            <p>Verifique o resultado da leitura da planilha antes de confirmar a gravação no Supabase.</p>
             
             <div style="display: flex; gap: 15px; margin: 20px 0;">
                 <div class="meta-box-inner" style="flex: 1; text-align: center; background: #f8fafc; padding: 15px; border-radius: 8px;">
@@ -847,7 +850,7 @@
         </div>
         <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
             <button class="btn btn-secondary" id="btn-cancel-import">Cancelar Importação</button>
-            <button class="btn btn-primary" id="btn-confirm-import">Confirmar e carregar slides</button>
+            <button class="btn btn-primary" id="btn-confirm-import">Confirmar, salvar e carregar slides</button>
         </div>
     </div>
 </div>
