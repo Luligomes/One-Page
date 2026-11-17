@@ -385,12 +385,18 @@ document.addEventListener("keydown", event => {
 
 function salvarDados() {
     try {
-        // O Supabase é a fonte oficial; este cache dura somente a sessão.
-        sessionStorage.setItem("MRO_Boletim_Dados", JSON.stringify(AppState));
+        // O Supabase é a fonte oficial. O cache local guarda apenas o estado
+        // leve da interface; bases e histórico completos excedem facilmente a
+        // cota do sessionStorage e já podem ser recarregados do banco.
+        const estadoLeve = { ...AppState };
+        delete estadoLeve.excelData;
+        delete estadoLeve.excelDataAnterior;
+        delete estadoLeve.historicoVersoes;
+        sessionStorage.setItem("MRO_Boletim_Dados", JSON.stringify(estadoLeve));
     } catch (error) {
         console.warn("Não foi possível atualizar o cache local:", error);
         if (typeof mostrarNotificacao === "function") {
-            mostrarNotificacao("O cache desta sessão atingiu o limite. Salve uma versão no Supabase.", "warning");
+            mostrarNotificacao("O cache local atingiu o limite, mas os dados salvos no Supabase permanecem disponíveis.", "warning");
         }
     }
 }
@@ -720,11 +726,13 @@ function configurarEventosGerais() {
             if (!verId) return;
             const ver = AppState.historicoVersoes.find(v => v.id === verId);
             if (ver) {
-                restaurarInformacoesComplementaresDaVersao(ver.dados);
+                const restaurouSlas = restaurarInformacoesComplementaresDaVersao(ver.dados);
                 salvarDados();
                 if (filterContrato) filterContrato.value = AppState.contrato;
                 if (typeof atualizarFiltrosLocalidade === 'function') atualizarFiltrosLocalidade();
-                if (typeof atualizarDashboardECartas === 'function') atualizarDashboardECartas();
+                if (typeof atualizarDashboardECartas === 'function') {
+                    atualizarDashboardECartas({ preservarSlas: restaurouSlas });
+                }
                 if (typeof mostrarNotificacao === 'function') mostrarNotificacao(`Comentários e informações complementares da versão "${ver.nome}" carregados!`, "success");
             }
         });
@@ -972,7 +980,7 @@ function aplicarAnotacoesIndicadoresDaVersao(anotacoes) {
 }
 
 function restaurarInformacoesComplementaresDaVersao(dadosVersao) {
-    if (!dadosVersao || typeof dadosVersao !== "object") return;
+    if (!dadosVersao || typeof dadosVersao !== "object") return false;
 
     const atual = AppState;
     const historicoVersoes = atual.historicoVersoes || [];
@@ -1027,9 +1035,15 @@ function restaurarInformacoesComplementaresDaVersao(dadosVersao) {
         atual.acoes.direcionadoresAcoes = copiarParaVersao(complemento.acoes.direcionadoresAcoes);
     }
 
+    const restaurouSlas = Array.isArray(complemento.slas);
+    if (restaurouSlas) {
+        atual.slas = copiarParaVersao(complemento.slas);
+    }
+
     aplicarAnotacoesIndicadoresDaVersao(complemento.anotacoesIndicadores || complemento.indicadores);
     atual.historicoVersoes = historicoVersoes;
     sincronizarDadosContratoAtivo();
+    return restaurouSlas;
 }
 
 // Salva o conteúdo editorial no Supabase para compartilhamento e persistência.
@@ -1046,7 +1060,7 @@ async function salvarNovaVersao() {
     const nomeVersao = nomeVersaoInput.trim() || defaultName;
     
     const snapshot = {
-        formato: "complementar-v2",
+        formato: "complementar-v3",
         contrato: AppState.contrato,
         complementar: {
         respMro: AppState.respMro,
@@ -1058,6 +1072,11 @@ async function salvarNovaVersao() {
         slide2HeaderSubtitle: AppState.slide2HeaderSubtitle,
         dadosContrato: copiarParaVersao(AppState.dadosContratos?.[AppState.contrato] || {}),
         acoes: { direcionadoresAcoes: copiarParaVersao(AppState.acoes?.direcionadoresAcoes || []) },
+        slas: (AppState.slas || []).map(item => ({
+            ...copiarParaVersao(item),
+            scopeContrato: item.scopeContrato || AppState.contrato,
+            scopeLocalidade: item.scopeLocalidade || filterLocalidade?.value || "todos"
+        })),
         anotacoesIndicadores: obterAnotacoesIndicadoresDaVersao()
         }
     };
@@ -1208,7 +1227,7 @@ function atualizarFiltrosLocalidade() {
 }
 
 // Atualiza todas as exibições com base nos filtros
-function atualizarDashboardECartas() {
+function atualizarDashboardECartas(opcoes = {}) {
     AppState.contrato = filterContrato.value;
     
     // Sincroniza dados do contrato ativo antes de renderizar (destaques, reuniões, etc.)
@@ -1239,7 +1258,11 @@ function atualizarDashboardECartas() {
     renderizarMenuSlides();
     
     // Atualiza a tabela de SLAs do Slide 2
-    atualizarSlasComDadosExcel(dadosFiltrados);
+    if (opcoes.preservarSlas) {
+        atualizarSlasPreservandoSelecao(dadosFiltrados, AppState.slas || []);
+    } else {
+        atualizarSlasComDadosExcel(dadosFiltrados);
+    }
     
     // Atualiza dropdown de versões para o contrato ativo
     atualizarDropdownVersoes();
@@ -2210,6 +2233,74 @@ function atualizarSlasComDadosExcel(dadosFiltrados) {
         };
     });
     
+    renderTabelaSLAs();
+}
+
+function normalizarIdentificadorSla(valor) {
+    return String(valor || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase();
+}
+
+function indicadorCorrespondeAoSla(indicador, slaSalvo) {
+    if (normalizarIdentificadorSla(indicador?.indicador) !== normalizarIdentificadorSla(slaSalvo?.sla)) {
+        return false;
+    }
+
+    const contratoSalvo = slaSalvo.scopeContrato;
+    const localidadeSalva = slaSalvo.scopeLocalidade;
+    const contratoIndicador = indicador.scopeContrato || indicador.contrato;
+    const localidadeIndicador = indicador.scopeLocalidade || indicador.localidade;
+
+    if (contratoSalvo && contratoIndicador && contratoSalvo !== contratoIndicador) return false;
+    if (localidadeSalva && localidadeSalva !== "todos" && localidadeIndicador && localidadeSalva !== localidadeIndicador) return false;
+    return true;
+}
+
+function atualizarSlasPreservandoSelecao(dadosFiltrados, slasSalvos) {
+    const snapshot = copiarParaVersao(Array.isArray(slasSalvos) ? slasSalvos : []);
+    if (snapshot.length === 0) {
+        AppState.slas = [];
+        renderTabelaSLAs();
+        return;
+    }
+
+    const usados = new Set();
+    const correspondencias = snapshot.map(slaSalvo => {
+        const indice = (dadosFiltrados || []).findIndex((indicador, index) =>
+            !usados.has(index) && indicadorCorrespondeAoSla(indicador, slaSalvo)
+        );
+        if (indice >= 0) usados.add(indice);
+        return { slaSalvo, indicador: indice >= 0 ? dadosFiltrados[indice] : null };
+    });
+
+    const indicadoresEncontrados = correspondencias
+        .filter(item => item.indicador)
+        .map(item => item.indicador);
+
+    let slasAtualizados = [];
+    if (indicadoresEncontrados.length > 0) {
+        atualizarSlasComDadosExcel(indicadoresEncontrados);
+        slasAtualizados = copiarParaVersao(AppState.slas || []);
+    }
+
+    let indiceAtualizado = 0;
+    AppState.slas = correspondencias.map(({ slaSalvo, indicador }) => {
+        if (!indicador) return slaSalvo;
+        const atualizado = slasAtualizados[indiceAtualizado++] || {};
+        return {
+            ...slaSalvo,
+            ...atualizado,
+            sla: slaSalvo.sla,
+            status: slaSalvo.status ?? atualizado.status,
+            icon: slaSalvo.icon ?? atualizado.icon,
+            scopeContrato: slaSalvo.scopeContrato || indicador.scopeContrato || indicador.contrato || AppState.contrato,
+            scopeLocalidade: slaSalvo.scopeLocalidade || indicador.scopeLocalidade || indicador.localidade || "todos"
+        };
+    });
+
     renderTabelaSLAs();
 }
 
