@@ -89,7 +89,6 @@ window.listarVersoesContratoSupabase = async function(contrato) {
         throw new Error('Supabase não está configurado nesta publicação.');
     }
     if (!contrato) return [];
-
     const { data, error } = await window.supabaseClientObj
         .from('versoes_contrato')
         .select('id, contrato, nome, periodo, dados, created_at')
@@ -267,7 +266,11 @@ async function validateAndPreviewExcel(matrix) {
     }
 
     const modal = document.getElementById("import-preview-modal");
-    if (modal) modal.style.display = "flex";
+    if (modal) {
+        modal.style.display = "flex";
+        modal.setAttribute("aria-hidden", "false");
+        requestAnimationFrame(() => modal.querySelector(".modal-container")?.focus());
+    }
 }
 
 // Handler de clique do modal
@@ -277,41 +280,29 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnClose = document.getElementById("btn-close-import-modal");
     const modal = document.getElementById("import-preview-modal");
 
-    if (btnCancel) btnCancel.addEventListener("click", () => modal.style.display = "none");
-    if (btnClose) btnClose.addEventListener("click", () => modal.style.display = "none");
+    const closeModal = () => {
+        modal.style.display = "none";
+        modal.setAttribute("aria-hidden", "true");
+    };
+    if (btnCancel) btnCancel.addEventListener("click", closeModal);
+    if (btnClose) btnClose.addEventListener("click", closeModal);
     
     if (btnConfirm) btnConfirm.addEventListener("click", async () => {
-        if (!window.supabaseClientObj) {
-            alert("Atenção: Supabase não está configurado. Verifique env.js.");
-            return;
-        }
-        
         btnConfirm.disabled = true;
-        btnConfirm.textContent = "Salvando...";
-
-        try {
-            await executarImportacaoSupabase(pendingImportPayload);
-        } catch (e) {
-            console.error("Importação interrompida antes da conclusão:", e);
-            alert("Não foi possível concluir a importação.\n\n" + e.message);
-            btnConfirm.disabled = false;
-            btnConfirm.textContent = "Confirmar, salvar e carregar slides";
-            return;
-        }
+        btnConfirm.textContent = "Carregando...";
 
         try {
             if (typeof window.aplicarRegistrosImportados === 'function') {
                 window.aplicarRegistrosImportados(pendingImportPayload);
             }
-            alert("Importação concluída com sucesso no Supabase!");
-            modal.style.display = "none";
-            if (typeof window.carregarDoSupabaseERenderizar === 'function') { await window.carregarDoSupabaseERenderizar(); }
+            alert("Importação concluída e salva neste navegador!");
+            closeModal();
         } catch (e) {
-            console.error("Dados salvos, mas houve erro ao atualizar a tela:", e);
-            alert("Os dados foram salvos no Supabase, mas a tela não pôde ser atualizada: " + e.message);
+            console.error("Erro ao atualizar a tela com os dados importados:", e);
+            alert("Não foi possível carregar os dados importados: " + e.message);
         } finally {
             btnConfirm.disabled = false;
-            btnConfirm.textContent = "Confirmar, salvar e carregar slides";
+            btnConfirm.textContent = "Confirmar e carregar slides";
         }
     });
 });

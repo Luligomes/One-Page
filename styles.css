@@ -2362,3 +2362,129 @@ tr.row-status-red [data-field="atual"], tr.row-status-red [data-field="m1"], tr.
 .hide-text-for-capture .sla-table td .trend-dash { color: #94a3b8 !important; }
 
 .text-green-value.placeholder-red { color: #ef4444 !important; }
+
+/* ========================================================================== 
+   Acessibilidade, autenticação e responsividade da interface
+   ========================================================================== */
+
+:focus-visible {
+    outline: 3px solid #0284c7;
+    outline-offset: 2px;
+}
+
+.slide-scale-container {
+    --preview-scale: 1;
+    transform: scale(var(--preview-scale));
+    transform-origin: top left;
+}
+
+@media (max-width: 1500px) {
+    .top-nav-bar,
+    .dashboard-panel {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .header-right,
+    .buttons-row {
+        flex-wrap: wrap;
+    }
+
+    .dashboard-row {
+        flex-wrap: wrap;
+    }
+
+    .dashboard-row .input-col {
+        flex: 1 1 180px;
+    }
+
+    .slide-viewport {
+        align-items: flex-start;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 980px) {
+    body,
+    .app-container {
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+    }
+
+    .top-nav-bar {
+        height: auto;
+        min-height: 60px;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .header-right {
+        width: 100%;
+    }
+
+    .workspace-body {
+        min-height: 720px;
+    }
+
+    .slides-sidebar {
+        width: 190px;
+        flex: 0 0 190px;
+    }
+
+    .slide-viewport {
+        padding: 16px;
+    }
+}
+
+@media (max-width: 700px) {
+    .header-title {
+        font-size: 17px;
+    }
+
+    .header-right .btn {
+        flex: 1 1 140px;
+        justify-content: center;
+    }
+
+    .file-upload-row {
+        flex-direction: column;
+    }
+
+    .workspace-body {
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .slides-sidebar {
+        width: 100%;
+        max-height: 130px;
+        flex: 0 0 auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .slides-list {
+        display: flex;
+        overflow-x: auto;
+    }
+
+    .slide-menu-item {
+        min-width: 165px;
+        border-bottom: 0;
+        border-right: 1px solid var(--border-color);
+    }
+
+    .slide-viewport {
+        min-height: 450px;
+        overflow: auto;
+    }
+
+    .modal-container {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 24px);
+        overflow: auto;
+    }
+}
