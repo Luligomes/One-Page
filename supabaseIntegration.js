@@ -532,6 +532,26 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => carregarListaClientesSupabase(), 1000);
 });
 
+// O PostgREST limita cada resposta a 1.000 linhas neste projeto. Contratos com
+// muitas localidades, como a Globo, ultrapassam esse volume em um único ano.
+// A consulta é recriada a cada página e ordenada pelo chamador para que nenhum
+// registro seja perdido ou repetido entre os blocos.
+async function buscarTodasPaginasSupabase(criarConsulta, tamanhoPagina = 1000) {
+    const todos = [];
+
+    for (let inicio = 0; ; inicio += tamanhoPagina) {
+        const fim = inicio + tamanhoPagina - 1;
+        const { data, error } = await criarConsulta().range(inicio, fim);
+        if (error) throw error;
+
+        const pagina = data || [];
+        todos.push(...pagina);
+        if (pagina.length < tamanhoPagina) break;
+    }
+
+    return todos;
+}
+
 
 async function fetchDashboardData(clienteNome, competencia) {
     if (!window.supabaseClientObj) return null; 
@@ -543,11 +563,13 @@ async function fetchDashboardData(clienteNome, competencia) {
         // A competência exibida precisa refletir o último dado efetivamente
         // importado para o contrato — e não o período que ficou selecionado
         // na tela antes da troca de filtro.
-        const { data: competencias, error: competenciasError } = await window.supabaseClientObj
-            .from('indicadores_competencia')
-            .select('competencia')
-            .eq('cliente_id', cliente.id);
-        if (competenciasError) throw competenciasError;
+        const competencias = await buscarTodasPaginasSupabase(() =>
+            window.supabaseClientObj
+                .from('indicadores_competencia')
+                .select('id, competencia')
+                .eq('cliente_id', cliente.id)
+                .order('id', { ascending: true })
+        );
 
         const competenciaMaisRecente = obterUltimaCompetenciaImportada(competencias || []);
         const competenciaSelecionada = competenciaMaisRecente || competencia;
@@ -555,10 +577,14 @@ async function fetchDashboardData(clienteNome, competencia) {
 
         const ano = competenciaSelecionada.split('/')[1];
         
-        const { data: indicadoresFato } = await window.supabaseClientObj.from('indicadores_competencia')
-            .select('*, indicadores(nome_indicador, grupos(nome_grupo, pilares(nome_pilar))), localidades(nome_localidade)')
-            .eq('cliente_id', cliente.id)
-            .like('competencia', `%/${ano}`); 
+        const indicadoresFato = await buscarTodasPaginasSupabase(() =>
+            window.supabaseClientObj
+                .from('indicadores_competencia')
+                .select('*, indicadores(nome_indicador, grupos(nome_grupo, pilares(nome_pilar))), localidades(nome_localidade)')
+                .eq('cliente_id', cliente.id)
+                .like('competencia', `%/${ano}`)
+                .order('id', { ascending: true })
+        );
             
         const { data: comentarios } = await window.supabaseClientObj.from('comentarios')
             .select('*')
