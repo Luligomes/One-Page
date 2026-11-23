@@ -15,7 +15,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- CSS Customizado -->
-    <link rel="stylesheet" href="styles.css?v=20260918-onepage-responsive-export-1">
+    <link rel="stylesheet" href="styles.css?v=20261123-multi-localidade-1">
     
     <!-- Bibliotecas Externas via CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -130,10 +130,16 @@
                     </select>
                 </div>
                 <div class="input-col col-half">
-                    <label for="filter-localidade">Filtro de localidade</label>
-                    <select id="filter-localidade" name="localidade">
-                        <option value="todos">Todas as localidades</option>
-                    </select>
+                    <span class="control-label" id="filter-localidade-label">Filtro de localidade</span>
+                    <div class="localidade-multiselect">
+                        <button type="button" id="filter-localidade-toggle" class="localidade-multiselect-toggle" aria-labelledby="filter-localidade-label filter-localidade-resumo" aria-expanded="false">
+                            <span id="filter-localidade-resumo">Todas as localidades</span>
+                            <span class="localidade-chevron" aria-hidden="true"></span>
+                        </button>
+                        <div id="filter-localidade-menu" class="localidade-multiselect-menu" hidden>
+                            <div id="filter-localidade" class="localidade-options" role="group" aria-labelledby="filter-localidade-label"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -811,8 +817,8 @@
     <script src="securityUtils.js?v=20261112-security-1"></script>
     <script src="supabaseClient.js?v=20261117-no-login-1"></script>
     <script src="supabaseIntegration.js?v=20261117-no-login-1"></script>
-    <script src="acumulado2025.js?v=20261123-fixed-history-1"></script>
-    <script src="app.js?v=20261123-fixed-history-1"></script>
+    <script src="acumulado2025.js?v=20261123-multi-localidade-1"></script>
+    <script src="app.js?v=20261123-multi-localidade-1"></script>
 
 <!-- Modal de Prévia de Importação -->
 <div class="modal-overlay" id="import-preview-modal" role="dialog" aria-modal="true" aria-labelledby="import-preview-title" aria-hidden="true" style="display: none;">

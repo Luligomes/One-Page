@@ -2068,11 +2068,96 @@ body {
     min-width: 300px;
 }
 
-.input-col label {
+.input-col label,
+.input-col .control-label {
     font-family: 'Outfit', sans-serif;
     font-size: 11px;
     font-weight: 700;
     color: #0f2b5c;
+}
+
+.localidade-multiselect {
+    position: relative;
+}
+
+.localidade-multiselect-toggle {
+    width: 100%;
+    height: 34px;
+    padding: 6px 34px 6px 12px;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #1e293b;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    position: relative;
+}
+
+.localidade-multiselect-toggle:focus-visible {
+    outline: 2px solid var(--brand-green);
+    outline-offset: 1px;
+}
+
+.localidade-chevron {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid #475569;
+    border-bottom: 2px solid #475569;
+    transform: translateY(-70%) rotate(45deg);
+    transition: transform 0.2s ease;
+}
+
+.localidade-multiselect-toggle[aria-expanded="true"] .localidade-chevron {
+    transform: translateY(-30%) rotate(225deg);
+}
+
+.localidade-multiselect-menu {
+    position: absolute;
+    z-index: 50;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(15, 43, 92, 0.18);
+}
+
+.localidade-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 5px;
+    color: #1e293b;
+    font-size: 13px;
+    line-height: 1.25;
+    cursor: pointer;
+}
+
+.localidade-option:hover {
+    background: #f0fdf4;
+}
+
+.input-col .localidade-option input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    accent-color: var(--brand-green);
+    flex: 0 0 auto;
 }
 
 .input-col input,

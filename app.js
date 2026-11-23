@@ -166,6 +166,9 @@ let btnToggleEdit;
 let dashboardPanel;
 let filterContrato;
 let filterLocalidade;
+let filterLocalidadeToggle;
+let filterLocalidadeMenu;
+let filterLocalidadeResumo;
 let excelFileInput;
 let excelFileInputAnterior;
 let btnUpdateCharts;
@@ -208,6 +211,9 @@ function mapearElementosDOM() {
     dashboardPanel = document.getElementById("dashboard-panel");
     filterContrato = document.getElementById("filter-contrato");
     filterLocalidade = document.getElementById("filter-localidade");
+    filterLocalidadeToggle = document.getElementById("filter-localidade-toggle");
+    filterLocalidadeMenu = document.getElementById("filter-localidade-menu");
+    filterLocalidadeResumo = document.getElementById("filter-localidade-resumo");
     excelFileInput = document.getElementById("excel-file-input");
     excelFileInputAnterior = document.getElementById("excel-file-input-anterior");
     btnUpdateCharts = document.getElementById("btn-update-charts");
@@ -664,8 +670,41 @@ function configurarEventosGerais() {
     }
 
     if (typeof filterLocalidade !== 'undefined' && filterLocalidade) {
-        filterLocalidade.addEventListener("change", () => {
+        filterLocalidade.addEventListener("change", event => {
+            const alterada = event.target;
+            if (!(alterada instanceof HTMLInputElement)) return;
+
+            const todas = filterLocalidade.querySelector('input[value="todos"]');
+            const outras = [...filterLocalidade.querySelectorAll('input:not([value="todos"])')];
+            if (alterada.value === "todos" && alterada.checked) {
+                outras.forEach(input => { input.checked = false; });
+            } else if (alterada.value !== "todos") {
+                if (todas) todas.checked = false;
+                if (!outras.some(input => input.checked) && todas) todas.checked = true;
+            }
+            atualizarResumoFiltroLocalidade();
             if (typeof atualizarDashboardECartas === 'function') atualizarDashboardECartas();
+        });
+    }
+
+    if (filterLocalidadeToggle && filterLocalidadeMenu) {
+        filterLocalidadeToggle.addEventListener("click", () => {
+            const abrir = filterLocalidadeMenu.hidden;
+            filterLocalidadeMenu.hidden = !abrir;
+            filterLocalidadeToggle.setAttribute("aria-expanded", String(abrir));
+        });
+        document.addEventListener("click", event => {
+            if (!event.target.closest(".localidade-multiselect")) {
+                filterLocalidadeMenu.hidden = true;
+                filterLocalidadeToggle.setAttribute("aria-expanded", "false");
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape") {
+                filterLocalidadeMenu.hidden = true;
+                filterLocalidadeToggle.setAttribute("aria-expanded", "false");
+                filterLocalidadeToggle.focus();
+            }
         });
     }
 
@@ -805,6 +844,7 @@ document.addEventListener("DOMContentLoaded", () => {
     prepararLogosMro(document).catch(error => console.error("Erro ao preparar logo MRO:", error));
     carregarDados();
     atualizarStatusBases();
+    atualizarFiltrosLocalidade();
     sincronizarDadosContratoAtivo();
     
     if (typeof carregarListaClientesSupabase === 'function') {
@@ -956,6 +996,7 @@ function obterAnotacoesIndicadoresDaVersao() {
         // contrato + localidade + indicador são a identidade estável do cartão.
         contrato: indicador.scopeContrato || indicador.contrato || AppState.contrato,
         localidade: indicador.scopeLocalidade || indicador.localidade || "todos",
+        localidades: indicador.scopeLocalidades || normalizarEscopoLocalidades(indicador.scopeLocalidade || indicador.localidade),
         indicador: indicador.indicador || indicador.title,
         comment: indicador.comment,
         arrow: indicador.arrow,
@@ -970,10 +1011,10 @@ function aplicarAnotacoesIndicadoresDaVersao(anotacoes) {
 
     anotacoes.forEach(anotacao => {
         const contrato = anotacao.contrato || AppState.contrato;
-        const localidade = anotacao.localidade || "todos";
+        const localidades = anotacao.localidades || anotacao.localidade || "todos";
         AppState.excelData.forEach(registro => {
             if (registro.contrato !== contrato || registro.indicador !== anotacao.indicador) return;
-            if (localidade !== "todos" && registro.localidade !== localidade) return;
+            if (!linhaPertenceAoEscopoLocalidades(registro, localidades)) return;
             ["comment", "arrow", "status", "icon"].forEach(campo => {
                 if (anotacao[campo] !== undefined) registro[campo] = anotacao[campo];
             });
@@ -1078,7 +1119,8 @@ async function salvarNovaVersao() {
         slas: (AppState.slas || []).map(item => ({
             ...copiarParaVersao(item),
             scopeContrato: item.scopeContrato || AppState.contrato,
-            scopeLocalidade: item.scopeLocalidade || filterLocalidade?.value || "todos"
+            scopeLocalidade: item.scopeLocalidade || "todos",
+            scopeLocalidades: item.scopeLocalidades || obterLocalidadesSelecionadas()
         })),
         anotacoesIndicadores: obterAnotacoesIndicadoresDaVersao()
         }
@@ -1208,19 +1250,42 @@ function obterAcumuladoHistoricoFixo(contrato, localidade, indicador) {
     const contratoNormalizado = normalizarParteChaveHistorica(contrato);
     const contratoKey = aliasesContrato[contratoNormalizado] || contratoNormalizado;
     const indicadorKey = normalizarParteChaveHistorica(indicador);
-    const localidadeKey = localidade === "todos"
-        ? "*"
-        : normalizarParteChaveHistorica(localidade);
-    const chaveExata = `${contratoKey}|${localidadeKey}|${indicadorKey}`;
+    const localidades = normalizarEscopoLocalidades(localidade);
     const chaveContrato = `${contratoKey}|*|${indicadorKey}`;
 
-    if (Object.prototype.hasOwnProperty.call(base.valores, chaveExata)) {
-        return base.valores[chaveExata];
+    if (localidades.includes("todos")) {
+        return Object.prototype.hasOwnProperty.call(base.valores, chaveContrato)
+            ? base.valores[chaveContrato]
+            : null;
     }
-    if (Object.prototype.hasOwnProperty.call(base.valores, chaveContrato)) {
-        return base.valores[chaveContrato];
+
+    const seriesSelecionadas = localidades
+        .map(item => `${contratoKey}|${normalizarParteChaveHistorica(item)}|${indicadorKey}`)
+        .map(chave => base.series?.[chave])
+        .filter(Boolean);
+    if (seriesSelecionadas.length === 0) return null;
+
+    if (seriesSelecionadas[0].a) {
+        return parseFloat(seriesSelecionadas.reduce((total, serie) =>
+            total + serie.m.reduce((soma, mes) => soma + (mes?.[0] || 0), 0), 0
+        ).toFixed(4));
     }
-    return null;
+
+    const mediasMensais = [];
+    for (let mesIdx = 0; mesIdx < 12; mesIdx++) {
+        let soma = 0;
+        let quantidade = 0;
+        seriesSelecionadas.forEach(serie => {
+            const mes = serie.m[mesIdx];
+            if (mes) {
+                soma += mes[0];
+                quantidade += mes[1];
+            }
+        });
+        if (quantidade > 0) mediasMensais.push(soma / quantidade);
+    }
+    if (mediasMensais.length === 0) return null;
+    return parseFloat((mediasMensais.reduce((a, b) => a + b, 0) / mediasMensais.length).toFixed(1));
 }
 
 const SLOT_INDICADORES = [
@@ -1232,36 +1297,80 @@ const SLOT_INDICADORES = [
     { key: "turnover", name: "Turnover", isPercentage: true, formula: "Média de Turnover" }
 ];
 
-// Atualiza o dropdown de localidades com base no contrato ativo
+function obterLocalidadesSelecionadas() {
+    if (!filterLocalidade) return ["todos"];
+    const selecionadas = [...filterLocalidade.querySelectorAll('input[type="checkbox"]:checked')]
+        .map(input => input.value);
+    return selecionadas.length > 0 ? selecionadas : ["todos"];
+}
+
+function normalizarEscopoLocalidades(escopo) {
+    if (Array.isArray(escopo)) return escopo.length > 0 ? escopo : ["todos"];
+    return escopo ? [escopo] : ["todos"];
+}
+
+function linhaPertenceAoEscopoLocalidades(row, escopo) {
+    const localidades = normalizarEscopoLocalidades(escopo);
+    return localidades.includes("todos") || localidades.includes(row.localidade);
+}
+
+function atualizarResumoFiltroLocalidade() {
+    if (!filterLocalidadeResumo) return;
+    const selecionadas = obterLocalidadesSelecionadas();
+    if (selecionadas.includes("todos")) {
+        filterLocalidadeResumo.textContent = "Todas as localidades";
+    } else if (selecionadas.length === 1) {
+        filterLocalidadeResumo.textContent = selecionadas[0];
+    } else {
+        filterLocalidadeResumo.textContent = `${selecionadas.length} localidades selecionadas`;
+    }
+}
+
+function criarOpcaoLocalidade(valor, texto, marcada) {
+    const id = `localidade-${normalizarParteChaveHistorica(valor).replace(/[^a-z0-9]+/g, "-") || "todos"}`;
+    const label = document.createElement("label");
+    label.className = "localidade-option";
+    label.htmlFor = id;
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = id;
+    input.value = valor;
+    input.checked = marcada;
+
+    const span = document.createElement("span");
+    span.textContent = texto;
+    label.append(input, span);
+    return label;
+}
+
+// Atualiza a lista de localidades com base no contrato ativo, preservando
+// todas as opções ainda válidas que o usuário já havia marcado.
 function atualizarFiltrosLocalidade() {
     if (!filterLocalidade) return;
-    
-    const valAnterior = filterLocalidade.value;
-    filterLocalidade.innerHTML = '<option value="todos">Todas as localidades</option>';
-    
-    if (AppState.excelData && AppState.excelData.length > 0) {
-        const contratoAtivo = filterContrato.value;
-        const localidadesSet = new Set();
-        
-        AppState.excelData.forEach(row => {
-            if (contratoAtivo === "todos" || row.contrato === contratoAtivo) {
-                if (row.localidade) {
-                    localidadesSet.add(row.localidade);
-                }
-            }
-        });
-        
-        localidadesSet.forEach(loc => {
-            const opt = document.createElement("option");
-            opt.value = loc;
-            opt.textContent = loc;
-            filterLocalidade.appendChild(opt);
-        });
-        
-        if (localidadesSet.has(valAnterior)) {
-            filterLocalidade.value = valAnterior;
+
+    const selecaoAnterior = new Set(obterLocalidadesSelecionadas());
+    const contratoAtivo = filterContrato?.value || "todos";
+    const localidadesSet = new Set();
+    (AppState.excelData || []).forEach(row => {
+        if ((contratoAtivo === "todos" || row.contrato === contratoAtivo) && row.localidade) {
+            localidadesSet.add(row.localidade);
         }
-    }
+    });
+
+    const localidades = [...localidadesSet].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const manterTodas = selecaoAnterior.has("todos") ||
+        !localidades.some(localidade => selecaoAnterior.has(localidade));
+
+    filterLocalidade.replaceChildren(
+        criarOpcaoLocalidade("todos", "Todas as localidades", manterTodas),
+        ...localidades.map(localidade => criarOpcaoLocalidade(
+            localidade,
+            localidade,
+            !manterTodas && selecaoAnterior.has(localidade)
+        ))
+    );
+    atualizarResumoFiltroLocalidade();
 }
 
 // Atualiza todas as exibições com base nos filtros
@@ -1362,7 +1471,10 @@ function sincronizarMetadadosIndicador(ind) {
     let found = false;
     AppState.excelData.forEach(row => {
         const matchContrato = row.contrato === ind.contrato;
-        const matchLocalidade = ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade;
+        const matchLocalidade = linhaPertenceAoEscopoLocalidades(
+            row,
+            ind.scopeLocalidades || ind.scopeLocalidade
+        );
         const matchIndicador = row.indicador === ind.indicador;
         if (matchContrato && matchLocalidade && matchIndicador) {
             row.meta = ind.meta;
@@ -1401,11 +1513,11 @@ function sincronizarValoresGrafico(ind) {
     const scopeContrato = ind.scopeContrato && ind.scopeContrato !== "todos"
         ? ind.scopeContrato
         : ind.contrato;
-    const scopeLocalidade = ind.scopeLocalidade || ind.localidade || "todos";
+    const scopeLocalidade = ind.scopeLocalidades || ind.scopeLocalidade || ind.localidade || "todos";
     const pertenceAoGrafico = row =>
         row.indicador === ind.indicador &&
         row.contrato === scopeContrato &&
-        (scopeLocalidade === "todos" || row.localidade === scopeLocalidade);
+        linhaPertenceAoEscopoLocalidades(row, scopeLocalidade);
 
     const sourceRows = Array.isArray(ind.sourceRows)
         ? ind.sourceRows.filter(row => AppState.excelData.includes(row) && pertenceAoGrafico(row))
@@ -1454,13 +1566,15 @@ function sincronizarValoresGrafico(ind) {
 // gráfico mesmo que possua um indicador com o mesmo nome.
 function obterDadosFiltrados() {
     const contratoSel = filterContrato.value;
-    const localidadeSel = filterLocalidade.value;
+    const localidadesSel = obterLocalidadesSelecionadas();
+    const todasLocalidades = localidadesSel.includes("todos");
+    const localidadeEscopo = todasLocalidades ? "todos" : [...localidadesSel];
     
     // Se tivermos planilha de Excel, filtramos dela e mantemos os objetos originais por referência
     if (AppState.excelData && AppState.excelData.length > 0) {
         const filteredRaw = AppState.excelData.filter(row => {
             const matchContrato = contratoSel === "todos" || row.contrato === contratoSel;
-            const matchLocalidade = localidadeSel === "todos" || row.localidade === localidadeSel;
+            const matchLocalidade = todasLocalidades || localidadesSel.includes(row.localidade);
             return matchContrato && matchLocalidade;
         });
         
@@ -1479,9 +1593,10 @@ function obterDadosFiltrados() {
                 grouped[groupKey] = {
                     id: `${rowContrato}-${indName}`.toLowerCase().replace(/[^a-z0-9]/g, ""),
                     contrato: rowContrato,
-                    localidade: localidadeSel,
+                    localidade: localidadeEscopo,
                     scopeContrato: rowContrato,
-                    scopeLocalidade: localidadeSel,
+                    scopeLocalidade: localidadeEscopo,
+                    scopeLocalidades: todasLocalidades ? ["todos"] : [...localidadesSel],
                     indicador: indName,
                     pilar: row.pilar,
                     grupo: row.grupo,
@@ -1579,7 +1694,10 @@ function obterDadosFiltrados() {
             if (AppState.excelDataAnterior && AppState.excelDataAnterior.length > 0) {
                 const prevRows = oldAcum === null ? AppState.excelDataAnterior.filter(row => {
                     const matchContrato = row.contrato === ind.scopeContrato;
-                    const matchLocalidade = ind.scopeLocalidade === "todos" || row.localidade === ind.scopeLocalidade;
+                    const matchLocalidade = linhaPertenceAoEscopoLocalidades(
+                        row,
+                        ind.scopeLocalidades || ind.scopeLocalidade
+                    );
                     return matchContrato && matchLocalidade && row.indicador === ind.indicador;
                 }) : [];
                 
@@ -1601,7 +1719,7 @@ function obterDadosFiltrados() {
             if (oldAcum === null) {
                 oldAcum = obterAcumuladoHistoricoFixo(
                     ind.scopeContrato,
-                    ind.scopeLocalidade,
+                    ind.scopeLocalidades || ind.scopeLocalidade,
                     ind.indicador
                 );
             }
@@ -2296,12 +2414,18 @@ function indicadorCorrespondeAoSla(indicador, slaSalvo) {
     }
 
     const contratoSalvo = slaSalvo.scopeContrato;
-    const localidadeSalva = slaSalvo.scopeLocalidade;
+    const localidadeSalva = slaSalvo.scopeLocalidades || slaSalvo.scopeLocalidade;
     const contratoIndicador = indicador.scopeContrato || indicador.contrato;
-    const localidadeIndicador = indicador.scopeLocalidade || indicador.localidade;
+    const localidadeIndicador = indicador.scopeLocalidades || indicador.scopeLocalidade || indicador.localidade;
 
     if (contratoSalvo && contratoIndicador && contratoSalvo !== contratoIndicador) return false;
-    if (localidadeSalva && localidadeSalva !== "todos" && localidadeIndicador && localidadeSalva !== localidadeIndicador) return false;
+    const salvas = normalizarEscopoLocalidades(localidadeSalva);
+    const atuais = normalizarEscopoLocalidades(localidadeIndicador);
+    if (!salvas.includes("todos")) {
+        const chaveSalva = [...salvas].sort().join("\u0000");
+        const chaveAtual = [...atuais].sort().join("\u0000");
+        if (chaveSalva !== chaveAtual) return false;
+    }
     return true;
 }
 
@@ -3737,10 +3861,12 @@ window.carregarDoSupabaseERenderizar = async function() {
                 AppState.excelData = preservarInformacoesComplementaresNosRegistros(dados.excelData);
                 atualizarPeriodoPelaCompetencia(dados.competencia);
                 Object.assign(AppState, dados.comentarios);
+                atualizarFiltrosLocalidade();
                 salvarDados(); // Cache local
                 console.log("Dados atualizados com sucesso via Supabase.");
             } else {
                 AppState.excelData = [];
+                atualizarFiltrosLocalidade();
                 console.warn("Nenhum dado encontrado no Supabase para " + AppState.contrato + " em " + compBackend);
             }
         } catch (e) {
