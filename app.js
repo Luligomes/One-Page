@@ -13,7 +13,9 @@ function atualizarStatusBases() {
     }
     
     if (statusAnterior) {
-        if (AppState.excelDataAnterior && AppState.excelDataAnterior.length > 0) {
+        if (window.MRO_ACUMULADO_2025?.valores) {
+            statusAnterior.textContent = "✓ Acumulado 2025 fixo carregado";
+        } else if (AppState.excelDataAnterior && AppState.excelDataAnterior.length > 0) {
             statusAnterior.textContent = "✓ Base anterior carregada na memória";
         } else {
             statusAnterior.innerHTML = "";
@@ -802,6 +804,7 @@ document.addEventListener("DOMContentLoaded", () => {
     mapearElementosDOM();
     prepararLogosMro(document).catch(error => console.error("Erro ao preparar logo MRO:", error));
     carregarDados();
+    atualizarStatusBases();
     sincronizarDadosContratoAtivo();
     
     if (typeof carregarListaClientesSupabase === 'function') {
@@ -1185,6 +1188,41 @@ function parseValorDadosBase(val, isPercentage) {
     return parseFloat(numVal.toFixed(2));
 }
 
+function normalizarParteChaveHistorica(valor) {
+    return String(valor ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, " ");
+}
+
+function obterAcumuladoHistoricoFixo(contrato, localidade, indicador) {
+    const base = window.MRO_ACUMULADO_2025;
+    if (!base?.valores) return null;
+
+    const aliasesContrato = {
+        "equatorial - go": "equatorial go",
+        "petrobras - gas": "petrobras"
+    };
+    const contratoNormalizado = normalizarParteChaveHistorica(contrato);
+    const contratoKey = aliasesContrato[contratoNormalizado] || contratoNormalizado;
+    const indicadorKey = normalizarParteChaveHistorica(indicador);
+    const localidadeKey = localidade === "todos"
+        ? "*"
+        : normalizarParteChaveHistorica(localidade);
+    const chaveExata = `${contratoKey}|${localidadeKey}|${indicadorKey}`;
+    const chaveContrato = `${contratoKey}|*|${indicadorKey}`;
+
+    if (Object.prototype.hasOwnProperty.call(base.valores, chaveExata)) {
+        return base.valores[chaveExata];
+    }
+    if (Object.prototype.hasOwnProperty.call(base.valores, chaveContrato)) {
+        return base.valores[chaveContrato];
+    }
+    return null;
+}
+
 const SLOT_INDICADORES = [
     { key: "cpt", name: "Acidentes do Trabalho CPT", isPercentage: false, formula: "Nº de Acidentes CPT" },
     { key: "spt", name: "Acidentes do Trabalho SPT", isPercentage: false, formula: "Nº de Acidentes SPT" },
@@ -1560,6 +1598,14 @@ function obterDadosFiltrados() {
                 }
             }
             
+            if (oldAcum === null) {
+                oldAcum = obterAcumuladoHistoricoFixo(
+                    ind.scopeContrato,
+                    ind.scopeLocalidade,
+                    ind.indicador
+                );
+            }
+
             if (oldAcum === null) {
                 // Fallback
                 const fallbackIdx = SLOT_INDICADORES.findIndex(slot => {
