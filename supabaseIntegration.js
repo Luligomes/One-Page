@@ -588,85 +588,37 @@ function parseNumberBr(str) {
 function processarDadosSupabase(indicadoresFato, comentarios, competenciaSelecionada) {
 
     const excelDataMock = [];
-    const indicadoresMap = {};
     
-    indicadoresFato.forEach(fato => {
-        const indNome = fato.indicadores.nome_indicador;
-        const grupo = fato.indicadores.grupos.nome_grupo;
-        const pilar = fato.indicadores.grupos.pilares.nome_pilar;
-        const loc = fato.localidades ? fato.localidades.nome_localidade : "Padrão";
-        
-        if (!indicadoresMap[indNome]) {
-            indicadoresMap[indNome] = {
-                indicador: indNome,
-                grupo: grupo,
-                pilar: pilar,
-                localidade: loc,
-                resultados: [],
-                atual: null,
-                m1: null
-            };
-        }
-        
-        const mesInt = parseInt(fato.competencia.split('/')[0]);
-        
-        indicadoresMap[indNome].resultados.push({
-            mes: mesInt,
-            competencia: fato.competencia,
-            valorStr: fato.dados_base,
-            metaStr: fato.meta,
-            valor: parseNumberBr(fato.dados_base),
-            meta: parseNumberBr(fato.meta),
-            formula: fato.formula_calculo
-        });
-    });
-    
-    const mesAtualInt = parseInt(competenciaSelecionada.split('/')[0]);
-    
-    Object.values(indicadoresMap).forEach(ind => {
-        const mesesAteAtual = ind.resultados.filter(r => r.mes <= mesAtualInt);
-        
-        let sumResultados = 0;
-        let countResultados = 0;
-        let sumMetas = 0;
-        let countMetas = 0;
-        
-        mesesAteAtual.forEach(r => {
-            if (r.valor !== null && !isNaN(r.valor)) {
-                sumResultados += r.valor;
-                countResultados++;
-            }
-            if (r.meta !== null && !isNaN(r.meta)) {
-                sumMetas += r.meta;
-                countMetas++;
-            }
-        });
-        
-        let mediaResultado = countResultados > 0 ? (sumResultados / countResultados) : null;
-        let mediaSLA = countMetas > 0 ? (sumMetas / countMetas) : null;
-        
-        ind.resultados.forEach(reg => {
-            const isPct = (reg.valorStr && String(reg.valorStr).includes('%')) || 
-                        (reg.metaStr && String(reg.metaStr).includes('%')) || 
-                        (reg.valor !== null && Math.abs(reg.valor) > 0 && Math.abs(reg.valor) <= 2) || 
-                        (reg.meta !== null && Math.abs(reg.meta) > 0 && Math.abs(reg.meta) <= 2);
-            
-            excelDataMock.push({
-                contrato: AppState.contrato,
-                localidade: ind.localidade || "Padrão",
-                isPercentage: isPct,
-                pilar: ind.pilar,
-                grupo: ind.grupo,
-                indicador: ind.indicador,
-                mes: reg.competencia,
-                mesIdx: parseInt(reg.competencia.split("/")[0]) - 1,
-                dadosBase: reg.valor,
-                meta: reg.meta, 
-                metaAcumulada: mediaSLA,
-                formula: reg.formula,
-                acumAtual: mediaResultado,
-                dadosMesM1: null
-            });
+    // Cada fato precisa manter sua localidade original. A consolidação por
+    // indicador acontece em obterDadosFiltrados(), depois que o filtro de
+    // localidades é aplicado. Agrupar aqui apenas pelo nome do indicador fazia
+    // todas as linhas herdarem a primeira localidade encontrada.
+    (indicadoresFato || []).forEach(fato => {
+        const indicador = fato.indicadores;
+        if (!indicador || !indicador.nome_indicador || !fato.competencia) return;
+
+        const valor = parseNumberBr(fato.dados_base);
+        const meta = parseNumberBr(fato.meta);
+        const isPct = (fato.dados_base && String(fato.dados_base).includes('%')) ||
+                    (fato.meta && String(fato.meta).includes('%')) ||
+                    (valor !== null && Math.abs(valor) > 0 && Math.abs(valor) <= 2) ||
+                    (meta !== null && Math.abs(meta) > 0 && Math.abs(meta) <= 2);
+        const grupo = indicador.grupos;
+        const localidade = fato.localidades?.nome_localidade || "Padrão";
+
+        excelDataMock.push({
+            contrato: AppState.contrato,
+            localidade,
+            isPercentage: isPct,
+            pilar: grupo?.pilares?.nome_pilar || "",
+            grupo: grupo?.nome_grupo || "",
+            indicador: indicador.nome_indicador,
+            mes: fato.competencia,
+            mesIdx: parseInt(fato.competencia.split("/")[0], 10) - 1,
+            dadosBase: valor,
+            meta,
+            formula: fato.formula_calculo,
+            dadosMesM1: null
         });
     });
 
