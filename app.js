@@ -250,11 +250,9 @@ function mapearElementosDOM() {
 }
 
 const NOMES_SLIDES_ESTATICOS = {
-    1: "Capa",
-    2: "One-Page Executivo",
-    9: "Plano de Acompanhamento",
-    10: "Realização das Reuniões",
-    11: "Periodicidade e Participantes"
+    acoes: "Plano de Acompanhamento",
+    crono1: "Realização das Reuniões",
+    crono2: "Periodicidade e Participantes"
 };
 
 function obterSlidesDisponiveis() {
@@ -262,7 +260,9 @@ function obterSlidesDisponiveis() {
         .map(slide => ({
             index: Number(slide.dataset.index),
             element: slide,
-            titulo: NOMES_SLIDES_ESTATICOS[Number(slide.dataset.index)] ||
+            titulo: (slide.dataset.index === "1" ? "Capa" : null) ||
+                (slide.dataset.index === "2" ? "One-Page Executivo" : null) ||
+                NOMES_SLIDES_ESTATICOS[slide.dataset.static] ||
                 slide.querySelector(".chart-slide-title")?.textContent?.trim() ||
                 `Slide ${slide.dataset.index}`
         }))
@@ -1383,6 +1383,18 @@ function atualizarDashboardECartas(opcoes = {}) {
     renderizarDadosGlobais();
     
     const dadosFiltrados = obterDadosFiltrados();
+
+    // O One Page é a fonte da ordem de apresentação. Acidentes CPT e SPT são
+    // prioridades fixas; os demais indicadores respeitam a sequência escolhida
+    // pelo usuário na tabela de SLA.
+    if (opcoes.preservarSlas) {
+        atualizarSlasPreservandoSelecao(dadosFiltrados, AppState.slas || []);
+    } else {
+        atualizarSlasComDadosExcel(dadosFiltrados);
+    }
+    garantirAcidentesNoInicioDosSlas();
+    renderTabelaSLAs();
+    const dadosOrdenados = ordenarIndicadoresPelosSlas(dadosFiltrados, AppState.slas || []);
     
     // Atualiza contadores do Painel de Controle
     cntContratos.textContent = obterContagemContratos();
@@ -1400,16 +1412,9 @@ function atualizarDashboardECartas(opcoes = {}) {
     });
     chartInstances = {};
     
-    // Recria os slides de gráficos de forma fixa (sempre 6 slides)
-    recriarSlidesGraficosDinamicamente(dadosFiltrados);
+    // Os slides seguem exatamente a ordem visível no SLA do One Page.
+    recriarSlidesGraficosDinamicamente(dadosOrdenados);
     renderizarMenuSlides();
-    
-    // Atualiza a tabela de SLAs do Slide 2
-    if (opcoes.preservarSlas) {
-        atualizarSlasPreservandoSelecao(dadosFiltrados, AppState.slas || []);
-    } else {
-        atualizarSlasComDadosExcel(dadosFiltrados);
-    }
     
     // Atualiza dropdown de versões para o contrato ativo
     atualizarDropdownVersoes();
@@ -1999,9 +2004,9 @@ function recriarSlidesGraficosDinamicamente(indicadoresFiltrados) {
     
     // Atualiza os IDs e data-indexes dos slides estáticos subsequentes no DOM
     const N = indicadoresFiltrados.length;
-    const slideAcoes = document.querySelector(".slide-container#slide-9, .slide-container[data-static='acoes']");
-    const slideCrono1 = document.querySelector(".slide-container#slide-10, .slide-container[data-static='crono1']");
-    const slideCrono2 = document.querySelector(".slide-container#slide-11, .slide-container[data-static='crono2']");
+    const slideAcoes = document.querySelector(".slide-container[data-static='acoes']");
+    const slideCrono1 = document.querySelector(".slide-container[data-static='crono1']");
+    const slideCrono2 = document.querySelector(".slide-container[data-static='crono2']");
     
     if (slideAcoes) {
         slideAcoes.setAttribute("data-static", "acoes");
@@ -2133,6 +2138,8 @@ function renderList(listId, dataArray) {
     });
 }
 
+let slaDragIndex = null;
+
 function renderTabelaSLAs() {
     const tbody = document.querySelector("#table-slas tbody");
     if (!tbody) return;
@@ -2141,17 +2148,56 @@ function renderTabelaSLAs() {
     (AppState.slas || []).forEach((item, index) => {
         const row = document.createElement("tr");
         row.dataset.slaIndex = index;
+        const acidenteComPosicaoFixa = obterPrioridadeIndicadorAcidente(item.sla) < 2;
+        row.draggable = modoEdicao && !acidenteComPosicaoFixa;
         const status = ["green", "yellow", "red"].includes(item.status) ? item.status : "green";
-        row.className = `row-status-${status}`;
+        row.className = `row-status-${status}${row.draggable ? " sla-row-draggable" : ""}`;
+
+        row.addEventListener("dragstart", event => {
+            if (!modoEdicao) {
+                event.preventDefault();
+                return;
+            }
+            slaDragIndex = index;
+            row.classList.add("sla-row-dragging");
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(index));
+        });
+        row.addEventListener("dragover", event => {
+            if (!modoEdicao || slaDragIndex === null || slaDragIndex === index) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            row.classList.add("sla-drop-target");
+        });
+        row.addEventListener("dragleave", () => row.classList.remove("sla-drop-target"));
+        row.addEventListener("drop", event => {
+            if (!modoEdicao) return;
+            event.preventDefault();
+            row.classList.remove("sla-drop-target");
+            const origem = slaDragIndex ?? Number(event.dataTransfer.getData("text/plain"));
+            slaDragIndex = null;
+            moverSlaParaPosicao(origem, index);
+        });
+        row.addEventListener("dragend", () => {
+            slaDragIndex = null;
+            row.classList.remove("sla-row-dragging");
+            document.querySelectorAll("#table-slas tbody .sla-drop-target")
+                .forEach(item => item.classList.remove("sla-drop-target"));
+        });
 
         const nome = document.createElement("td");
+        const dragHandle = document.createElement("span");
+        dragHandle.className = `sla-drag-handle edit-only-inline${acidenteComPosicaoFixa ? " sla-drag-handle-fixed" : ""}`;
+        dragHandle.title = acidenteComPosicaoFixa ? "Indicador fixo no início" : "Arraste para ordenar o indicador";
+        dragHandle.setAttribute("aria-hidden", "true");
+        dragHandle.textContent = acidenteComPosicaoFixa ? "●" : "⋮⋮";
         const nomeText = document.createElement("span");
         nomeText.className = "editable-text";
         nomeText.dataset.field = "sla";
         nomeText.contentEditable = modoEdicao ? "true" : "false";
         setSafeRichText(nomeText, item.sla || "");
         nomeText.addEventListener("blur", () => window.updateSlaField(index, "sla", nomeText.innerHTML, nomeText.textContent));
-        nome.appendChild(nomeText);
+        nome.append(dragHandle, nomeText);
         row.appendChild(nome);
 
         [
@@ -2204,7 +2250,7 @@ function renderTabelaSLAs() {
         moveUpButton.title = "Mover indicador para cima";
         moveUpButton.setAttribute("aria-label", "Mover indicador para cima");
         moveUpButton.textContent = "↑";
-        moveUpButton.disabled = index === 0;
+        moveUpButton.disabled = acidenteComPosicaoFixa || index === 0;
         moveUpButton.addEventListener("click", () => window.moveSlaIndicator(index, -1));
 
         const moveDownButton = document.createElement("button");
@@ -2213,7 +2259,7 @@ function renderTabelaSLAs() {
         moveDownButton.title = "Mover indicador para baixo";
         moveDownButton.setAttribute("aria-label", "Mover indicador para baixo");
         moveDownButton.textContent = "↓";
-        moveDownButton.disabled = index === (AppState.slas || []).length - 1;
+        moveDownButton.disabled = acidenteComPosicaoFixa || index === (AppState.slas || []).length - 1;
         moveDownButton.addEventListener("click", () => window.moveSlaIndicator(index, 1));
 
         orderControls.append(moveUpButton, moveDownButton);
@@ -2268,18 +2314,26 @@ window.removeSlaIndicator = function(index) {
     autoFitCompact();
 };
 
-window.moveSlaIndicator = function(index, direction) {
+function moverSlaParaPosicao(index, destination) {
     if (!modoEdicao || !Array.isArray(AppState.slas)) return;
-    const destination = index + direction;
     if (index < 0 || destination < 0 || index >= AppState.slas.length || destination >= AppState.slas.length) return;
+    if (index === destination) return;
 
-    [AppState.slas[index], AppState.slas[destination]] = [AppState.slas[destination], AppState.slas[index]];
+    sincronizarMetadadosOnePageDoDOM();
+    const [movido] = AppState.slas.splice(index, 1);
+    AppState.slas.splice(destination, 0, movido);
+    garantirAcidentesNoInicioDosSlas();
     salvarDados();
-    renderTabelaSLAs();
+    atualizarDashboardECartas({ preservarSlas: true });
     autoFitCompact();
 
-    const movedRow = document.querySelector(`#table-slas tbody tr:nth-child(${destination + 1})`);
+    const novaPosicao = AppState.slas.indexOf(movido);
+    const movedRow = document.querySelector(`#table-slas tbody tr:nth-child(${novaPosicao + 1})`);
     if (movedRow) movedRow.classList.add("sla-row-moved");
+}
+
+window.moveSlaIndicator = function(index, direction) {
+    moverSlaParaPosicao(index, index + direction);
 };
 
 // Atualiza a tabela do slide 2 (SLA) a partir das linhas do Excel filtradas
@@ -2393,7 +2447,10 @@ function atualizarSlasComDadosExcel(dadosFiltrados) {
             acumulado: acumuladoText,
             status: status,
             icon: iconType,
-            hasOverride: hasOverride
+            hasOverride: hasOverride,
+            scopeContrato: ind.scopeContrato || ind.contrato || AppState.contrato,
+            scopeLocalidade: ind.scopeLocalidade || ind.localidade || "todos",
+            scopeLocalidades: ind.scopeLocalidades || normalizarEscopoLocalidades(ind.scopeLocalidade || ind.localidade)
         };
     });
     
@@ -2406,6 +2463,44 @@ function normalizarIdentificadorSla(valor) {
         .replace(/[\u0300-\u036f]/g, "")
         .trim()
         .toLowerCase();
+}
+
+function obterPrioridadeIndicadorAcidente(valor) {
+    const nome = normalizarIdentificadorSla(valor);
+    if (nome.includes("acidentes do trabalho cpt")) return 0;
+    if (nome.includes("acidentes do trabalho spt")) return 1;
+    return 2;
+}
+
+function garantirAcidentesNoInicioDosSlas() {
+    if (!Array.isArray(AppState.slas)) return;
+    AppState.slas = AppState.slas
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => {
+            const prioridade = obterPrioridadeIndicadorAcidente(a.item?.sla) - obterPrioridadeIndicadorAcidente(b.item?.sla);
+            return prioridade || a.index - b.index;
+        })
+        .map(({ item }) => item);
+}
+
+function ordenarIndicadoresPelosSlas(dadosFiltrados, slas) {
+    const dados = Array.isArray(dadosFiltrados) ? dadosFiltrados : [];
+    const usados = new Set();
+    const ordenados = [];
+
+    (slas || []).forEach(sla => {
+        const indice = dados.findIndex((indicador, index) =>
+            !usados.has(index) && indicadorCorrespondeAoSla(indicador, sla)
+        );
+        if (indice < 0) return;
+        usados.add(indice);
+        ordenados.push(dados[indice]);
+    });
+
+    dados.forEach((indicador, index) => {
+        if (!usados.has(index)) ordenados.push(indicador);
+    });
+    return ordenados;
 }
 
 function indicadorCorrespondeAoSla(indicador, slaSalvo) {

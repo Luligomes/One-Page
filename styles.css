@@ -942,6 +942,38 @@ body {
     animation: sla-row-highlight 0.7s ease-out;
 }
 
+.sla-row-draggable {
+    cursor: grab;
+}
+
+.sla-row-draggable:active {
+    cursor: grabbing;
+}
+
+.sla-drag-handle {
+    margin-right: 7px;
+    color: #64748b;
+    font-weight: 800;
+    letter-spacing: -3px;
+    cursor: grab;
+    user-select: none;
+}
+
+.sla-drag-handle-fixed {
+    color: var(--brand-green);
+    letter-spacing: 0;
+    cursor: default;
+}
+
+.sla-row-dragging {
+    opacity: 0.45;
+}
+
+.sla-drop-target {
+    outline: 2px dashed var(--brand-green);
+    outline-offset: -2px;
+}
+
 @keyframes sla-row-highlight {
     from { background-color: #dff7ee; }
     to { background-color: transparent; }
