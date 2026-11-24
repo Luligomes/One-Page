@@ -1593,7 +1593,11 @@ function obterDadosFiltrados() {
             const groupKey = `${rowContrato}\u0000${indName}`;
             if (!grouped[groupKey]) {
                 const nameLower = indName.toLowerCase();
-                let isPct = !nameLower.includes("acidente") && !nameLower.includes("cpt") && !nameLower.includes("spt");
+                const isPct = typeof row.isPercentage === "boolean"
+                    ? row.isPercentage
+                    : !nameLower.includes("acidente") && !nameLower.includes("cpt") && !nameLower.includes("spt");
+                const metodoAcumulado = row.metodoAcumulado ||
+                    (nameLower.includes("acidente") || nameLower.includes("cpt") || nameLower.includes("spt") ? "soma" : "media");
                 
                 grouped[groupKey] = {
                     id: `${rowContrato}-${indName}`.toLowerCase().replace(/[^a-z0-9]/g, ""),
@@ -1612,6 +1616,7 @@ function obterDadosFiltrados() {
                     metaDados: new Array(12).fill(0),
                     arrow: row.arrow || (nameLower.includes("acidente") || nameLower.includes("turnover") ? "down" : "up"),
                     isPercentage: isPct,
+                    metodoAcumulado,
                     formula: row.formula || "Fórmula padrão",
                     comment: row.comment || "Comentário sobre o indicador:",
                     status: row.status || null,
@@ -1645,14 +1650,14 @@ function obterDadosFiltrados() {
         const consolidatedList = Object.values(grouped);
         
         consolidatedList.forEach(ind => {
-            const isAccidents = ind.indicador.toLowerCase().includes("acidente") || ind.indicador.toLowerCase().includes("cpt") || ind.indicador.toLowerCase().includes("spt");
+            const usaSoma = ind.metodoAcumulado === "soma";
             
             for (let m = 0; m < 12; m++) {
                 // Consolida os dados mensais
                 const vals = ind.monthlyRawValues[m];
                 if (vals.length > 0) {
-                    if (isAccidents) {
-                        ind.dados[m] = vals.reduce((a, b) => a + b, 0); // Soma acidentes
+                    if (usaSoma) {
+                        ind.dados[m] = vals.reduce((a, b) => a + b, 0); // Soma indicadores totalizáveis
                     } else {
                         ind.dados[m] = parseFloat((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)); // Média de taxas
                     }
@@ -1668,8 +1673,8 @@ function obterDadosFiltrados() {
             // Calcula o acumulado atual (média aritmética dos meses preenchidos)
             const validConsolidated = ind.dados.filter(v => v !== null);
             if (validConsolidated.length > 0) {
-                if (isAccidents) {
-                    ind.acumAtual = validConsolidated.reduce((a, b) => a + b, 0); // Soma para CPT/SPT
+                if (usaSoma) {
+                    ind.acumAtual = validConsolidated.reduce((a, b) => a + b, 0); // Soma conforme cadastro
                 } else {
                     ind.acumAtual = parseFloat((validConsolidated.reduce((a, b) => a + b, 0) / validConsolidated.length).toFixed(1)); // Média aritmética
                 }
@@ -1713,7 +1718,7 @@ function obterDadosFiltrados() {
                 });
                 
                 if (prevVals.length > 0) {
-                    if (isAccidents) {
+                    if (usaSoma) {
                         oldAcum = prevVals.reduce((a, b) => a + b, 0);
                     } else {
                         oldAcum = parseFloat((prevVals.reduce((a, b) => a + b, 0) / prevVals.length).toFixed(1));

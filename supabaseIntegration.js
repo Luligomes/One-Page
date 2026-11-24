@@ -490,11 +490,13 @@ async function executarImportacaoSupabase(records) {
 async function carregarListaClientesSupabase() {
     if (!window.supabaseClientObj) return;
     try {
+        if (window.MROGestaoConfig?.carregar) await window.MROGestaoConfig.carregar();
         const { data, error } = await window.supabaseClientObj.from('clientes').select('nome_cliente');
         if (error) throw error;
         if (data && data.length > 0) {
+            const clientesAtivos = data.filter(c => !window.MROGestaoConfig?.contratoArquivado(c.nome_cliente));
             AppState.dadosContratos = AppState.dadosContratos || {};
-            data.forEach(c => {
+            clientesAtivos.forEach(c => {
                 const nome = c.nome_cliente;
                 if (!AppState.dadosContratos[nome]) {
                     // Clona a estrutura do CBO para garantir que o front-end n quebre
@@ -508,7 +510,7 @@ async function carregarListaClientesSupabase() {
             if (filterContrato) {
                 const currentVal = AppState.contrato || filterContrato.value;
                 filterContrato.innerHTML = '<option value="todos">Todos os contratos</option>';
-                data
+                clientesAtivos
                     .map(c => c.nome_cliente)
                     .filter(Boolean)
                     .sort((a, b) => a.localeCompare(b, 'pt-BR'))
@@ -519,7 +521,7 @@ async function carregarListaClientesSupabase() {
                         filterContrato.appendChild(opt);
                     });
 
-                filterContrato.value = data.some(c => c.nome_cliente === currentVal) ? currentVal : "todos";
+                filterContrato.value = clientesAtivos.some(c => c.nome_cliente === currentVal) ? currentVal : "todos";
             }
             salvarDados();
         }
@@ -527,6 +529,8 @@ async function carregarListaClientesSupabase() {
         console.error("Erro ao puxar clientes do supabase:", e);
     }
 }
+
+window.carregarListaClientesSupabase = carregarListaClientesSupabase;
 
 document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => carregarListaClientesSupabase(), 1000);
@@ -557,6 +561,8 @@ async function fetchDashboardData(clienteNome, competencia) {
     if (!window.supabaseClientObj) return null; 
     
     try {
+        if (window.MROGestaoConfig?.carregar) await window.MROGestaoConfig.carregar();
+        if (window.MROGestaoConfig?.contratoArquivado(clienteNome)) return null;
         const { data: cliente } = await window.supabaseClientObj.from('clientes').select('id').eq('nome_cliente', clienteNome).single();
         if (!cliente) return null;
 
@@ -593,8 +599,12 @@ async function fetchDashboardData(clienteNome, competencia) {
             .order('categoria', { ascending: true })
             .order('ordem', { ascending: true });
 
+        const indicadoresAtivos = indicadoresFato.filter(fato =>
+            !window.MROGestaoConfig?.indicadorArquivado(clienteNome, fato.indicadores?.nome_indicador)
+        );
+
         return {
-            ...processarDadosSupabase(indicadoresFato, comentarios, competenciaSelecionada),
+            ...processarDadosSupabase(indicadoresAtivos, comentarios, competenciaSelecionada, clienteNome),
             competencia: competenciaSelecionada
         };
     } catch (e) {
@@ -611,7 +621,7 @@ function parseNumberBr(str) {
     return parseFloat(cleanStr.replace(',', '.'));
 }
 
-function processarDadosSupabase(indicadoresFato, comentarios, competenciaSelecionada) {
+function processarDadosSupabase(indicadoresFato, comentarios, competenciaSelecionada, clienteNome = AppState.contrato) {
 
     const excelDataMock = [];
     
@@ -625,17 +635,22 @@ function processarDadosSupabase(indicadoresFato, comentarios, competenciaSelecio
 
         const valor = parseNumberBr(fato.dados_base);
         const meta = parseNumberBr(fato.meta);
-        const isPct = (fato.dados_base && String(fato.dados_base).includes('%')) ||
+        const configuracao = window.MROGestaoConfig?.obterIndicador(clienteNome, indicador.nome_indicador);
+        const isPctDetectado = (fato.dados_base && String(fato.dados_base).includes('%')) ||
                     (fato.meta && String(fato.meta).includes('%')) ||
                     (valor !== null && Math.abs(valor) > 0 && Math.abs(valor) <= 2) ||
                     (meta !== null && Math.abs(meta) > 0 && Math.abs(meta) <= 2);
+        const isPct = configuracao?.tipo === "numero"
+            ? false
+            : configuracao?.tipo === "percentual" ? true : isPctDetectado;
         const grupo = indicador.grupos;
         const localidade = fato.localidades?.nome_localidade || "Padrão";
 
         excelDataMock.push({
-            contrato: AppState.contrato,
+            contrato: clienteNome,
             localidade,
             isPercentage: isPct,
+            metodoAcumulado: configuracao?.metodoAcumulado || (/acidente|cpt|spt/i.test(indicador.nome_indicador) ? "soma" : "media"),
             pilar: grupo?.pilares?.nome_pilar || "",
             grupo: grupo?.nome_grupo || "",
             indicador: indicador.nome_indicador,
