@@ -140,7 +140,7 @@
             <div id="management-indicator-fields">
                 <div class="management-grid"><div><label for="management-form-pillar">Pilar</label><input id="management-form-pillar" value="Manual"></div><div><label for="management-form-group">Grupo</label><input id="management-form-group" value="Manual"></div></div>
                 <div class="management-grid"><div><label for="management-form-type">Tipo</label><select id="management-form-type"><option value="percentual">Percentual</option><option value="numero">Número</option></select></div><div><label for="management-form-method">Cálculo do acumulado</label><select id="management-form-method"><option value="media">Média</option><option value="soma">Soma</option></select></div></div>
-                <div class="management-grid"><div><label for="management-form-meta">Meta inicial</label><input id="management-form-meta" placeholder="Ex.: 97% ou 0"></div><div><label for="management-form-locality">Localidade</label><input id="management-form-locality" value="Consolidado"></div></div>
+                <div class="management-grid"><div><label for="management-form-meta">Meta inicial</label><input id="management-form-meta" placeholder="Ex.: 97% ou 0"></div><div><label for="management-form-locality">Localidade</label><select id="management-form-locality" required></select><div id="management-new-locality-wrap" class="management-new-locality" hidden><label for="management-form-new-locality">Nome da nova localidade</label><input id="management-form-new-locality" maxlength="160" placeholder="Digite a nova localidade"></div></div></div>
                 <label for="management-form-formula">Fórmula / observação</label><input id="management-form-formula" placeholder="Descreva como o indicador é calculado">
             </div>
             <p id="management-form-hint"></p><div class="management-form-actions"><button type="button" id="management-form-cancel">Cancelar</button><button class="management-primary" type="submit">Confirmar</button></div>
@@ -186,18 +186,29 @@
         const fatos = [];
         for (let inicio = 0; ; inicio += 1000) {
             const { data, error } = await supabase().from("indicadores_competencia")
-                .select("indicador_id,meta,formula_calculo,indicadores(id,nome_indicador,grupos(nome_grupo,pilares(nome_pilar)))")
+                .select("indicador_id,localidade_id,meta,formula_calculo,indicadores(id,nome_indicador,grupos(nome_grupo,pilares(nome_pilar))),localidades(id,nome_localidade)")
                 .eq("cliente_id", contrato.id).order("id").range(inicio, inicio + 999);
             if (error) throw new Error(error.message);
             fatos.push(...(data || []));
             if (!data || data.length < 1000) break;
         }
+        const { data: localidades, error: localidadesError } = await supabase().from("localidades")
+            .select("id,nome_localidade").eq("cliente_id", contrato.id).order("nome_localidade");
+        if (localidadesError) throw new Error(localidadesError.message);
+
         const unicos = new Map();
         fatos.forEach(f => {
             const ind = f.indicadores;
-            if (ind?.nome_indicador && !unicos.has(ind.id)) unicos.set(ind.id, { ...ind, meta: f.meta, formula: f.formula_calculo });
+            if (!ind?.nome_indicador) return;
+            if (!unicos.has(ind.id)) {
+                unicos.set(ind.id, { ...ind, meta: f.meta, formula: f.formula_calculo, localidadeIds: [], localidades: [] });
+            }
+            const cadastrado = unicos.get(ind.id);
+            if (f.localidade_id && !cadastrado.localidadeIds.includes(f.localidade_id)) cadastrado.localidadeIds.push(f.localidade_id);
+            const nomeLocalidade = f.localidades?.nome_localidade;
+            if (nomeLocalidade && !cadastrado.localidades.includes(nomeLocalidade)) cadastrado.localidades.push(nomeLocalidade);
         });
-        dadosContrato = { ...contrato, indicadores: [...unicos.values()] };
+        dadosContrato = { ...contrato, localidades: localidades || [], indicadores: [...unicos.values()] };
         el("management-empty").hidden = true;
         el("management-detail").hidden = false;
         el("management-contract-title").textContent = contrato.nome_cliente;
@@ -278,7 +289,7 @@
         el("management-form-type").value = cfg?.tipo || "percentual";
         el("management-form-method").value = cfg?.metodoAcumulado || "media";
         el("management-form-meta").value = ind?.meta || "";
-        el("management-form-locality").value = "Consolidado";
+        preencherLocalidades(ind?.localidades?.[0]);
         el("management-form-formula").value = ind?.formula || "";
         el("management-indicator-fields").hidden = false;
         el("management-form-kicker").textContent = "INDICADOR";
@@ -287,6 +298,37 @@
         el("management-form-overlay").hidden = false;
         atualizarRegraAcidenteForm();
         el("management-form-name").focus();
+    }
+
+    function preencherLocalidades(localidadeAtual = "") {
+        const select = el("management-form-locality");
+        select.replaceChildren();
+        const localidades = [...(dadosContrato?.localidades || [])]
+            .sort((a, b) => a.nome_localidade.localeCompare(b.nome_localidade, "pt-BR"));
+        localidades.forEach(localidade => {
+            const option = document.createElement("option");
+            option.value = localidade.nome_localidade;
+            option.textContent = localidade.nome_localidade;
+            select.appendChild(option);
+        });
+        const nova = document.createElement("option");
+        nova.value = "__nova__";
+        nova.textContent = "+ Incluir nova localidade";
+        select.appendChild(nova);
+
+        const consolidado = localidades.find(item => chave(item.nome_localidade) === "consolidado");
+        select.value = localidades.some(item => item.nome_localidade === localidadeAtual)
+            ? localidadeAtual
+            : consolidado?.nome_localidade || localidades[0]?.nome_localidade || "__nova__";
+        el("management-form-new-locality").value = "";
+        atualizarCampoNovaLocalidade();
+    }
+
+    function atualizarCampoNovaLocalidade() {
+        const nova = el("management-form-locality").value === "__nova__";
+        el("management-new-locality-wrap").hidden = !nova;
+        el("management-form-new-locality").required = nova;
+        if (nova) el("management-form-new-locality").focus();
     }
 
     function atualizarRegraAcidenteForm() {
@@ -341,7 +383,11 @@
     async function salvarIndicador(kind, nome, original) {
         const pilarNome = normalizar(el("management-form-pillar").value) || "Manual";
         const grupoNome = normalizar(el("management-form-group").value) || "Manual";
-        const localNome = normalizar(el("management-form-locality").value) || "Consolidado";
+        const localSelecionada = el("management-form-locality").value;
+        const localNome = localSelecionada === "__nova__"
+            ? normalizar(el("management-form-new-locality").value)
+            : normalizar(localSelecionada);
+        if (!localNome) throw new Error("Informe o nome da nova localidade.");
         const tipo = eAcidente(nome) ? "numero" : el("management-form-type").value;
         const metodo = eAcidente(nome) ? "soma" : el("management-form-method").value;
         const cliente = (await listarContratos()).find(c => c.nome_cliente === contratoSelecionado);
@@ -374,6 +420,17 @@
                 meta: normalizar(el("management-form-meta").value), formula_calculo: normalizar(el("management-form-formula").value)
             }).eq("cliente_id", cliente.id).eq("indicador_id", indicador.id);
             if (error) throw new Error(error.message);
+
+            const indicadorAnterior = dadosContrato.indicadores.find(i => i.nome_indicador === original);
+            if (!indicadorAnterior?.localidadeIds?.includes(local.id)) {
+                const ano = appState()?.anoAtual || new Date().getFullYear();
+                const { error: associacaoError } = await supabase().from("indicadores_competencia").upsert({
+                    localidade_id: local.id, cliente_id: cliente.id, indicador_id: indicador.id,
+                    competencia: `01/${ano}`, meta: normalizar(el("management-form-meta").value),
+                    formula_calculo: normalizar(el("management-form-formula").value), dados_base: ""
+                }, { onConflict: "localidade_id,cliente_id,indicador_id,competencia" });
+                if (associacaoError) throw new Error(associacaoError.message);
+            }
         }
         const cfg = indicadorConfig(contratoSelecionado, nome, true);
         cfg.nome = nome; cfg.tipo = tipo; cfg.metodoAcumulado = metodo; cfg.arquivado = false;
@@ -406,6 +463,7 @@
         el("management-form-close").addEventListener("click", fecharFormulario);
         el("management-form-cancel").addEventListener("click", fecharFormulario);
         el("management-form-name").addEventListener("input", atualizarRegraAcidenteForm);
+        el("management-form-locality").addEventListener("change", atualizarCampoNovaLocalidade);
         el("management-form").addEventListener("submit", event => salvarFormulario(event).catch(error => status(error.message, true)));
         el("management-archive-contract").addEventListener("click", () => {
             const cc = contratoConfig(contratoSelecionado, true); cc.arquivado = !cc.arquivado;

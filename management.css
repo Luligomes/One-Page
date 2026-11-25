@@ -44,6 +44,8 @@
 .management-form-head > button { color: #17345f; }
 .management-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .management-grid > div { display: flex; flex-direction: column; gap: 6px; }
+.management-new-locality { margin-top: 7px; padding: 10px; border-radius: 8px; background: #eef9f6; }
+.management-new-locality label { display: block; margin-bottom: 6px; color: #187f68; }
 .management-form > p { background: #f0f7ff; color: #536a83; padding: 10px; border-radius: 7px; font-size: 11px; }
 .management-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 @media (max-width: 800px) {
