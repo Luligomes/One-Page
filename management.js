@@ -289,7 +289,7 @@
         el("management-form-type").value = cfg?.tipo || "percentual";
         el("management-form-method").value = cfg?.metodoAcumulado || "media";
         el("management-form-meta").value = ind?.meta || "";
-        preencherLocalidades(ind?.localidades?.[0]);
+        preencherLocalidades(ind);
         el("management-form-formula").value = ind?.formula || "";
         el("management-indicator-fields").hidden = false;
         el("management-form-kicker").textContent = "INDICADOR";
@@ -300,11 +300,26 @@
         el("management-form-name").focus();
     }
 
-    function preencherLocalidades(localidadeAtual = "") {
+    function preencherLocalidades(indicador = null) {
         const select = el("management-form-locality");
         select.replaceChildren();
         const localidades = [...(dadosContrato?.localidades || [])]
             .sort((a, b) => a.nome_localidade.localeCompare(b.nome_localidade, "pt-BR"));
+        const todas = document.createElement("option");
+        todas.value = "__todas__";
+        todas.textContent = "Todas as localidades";
+        select.appendChild(todas);
+
+        const localidadesAssociadas = indicador?.localidadeIds || [];
+        const indicadorContratual = Boolean(indicador && eAcidente(indicador.nome_indicador));
+        const todasAssociadas = indicadorContratual ||
+            (localidades.length > 0 && localidadesAssociadas.length === localidades.length);
+        if (localidadesAssociadas.length > 1 && !todasAssociadas) {
+            const multiplas = document.createElement("option");
+            multiplas.value = "__associadas__";
+            multiplas.textContent = `${localidadesAssociadas.length} localidades associadas`;
+            select.appendChild(multiplas);
+        }
         localidades.forEach(localidade => {
             const option = document.createElement("option");
             option.value = localidade.nome_localidade;
@@ -316,10 +331,16 @@
         nova.textContent = "+ Incluir nova localidade";
         select.appendChild(nova);
 
-        const consolidado = localidades.find(item => chave(item.nome_localidade) === "consolidado");
-        select.value = localidades.some(item => item.nome_localidade === localidadeAtual)
-            ? localidadeAtual
-            : consolidado?.nome_localidade || localidades[0]?.nome_localidade || "__nova__";
+        const unicaAssociada = indicador?.localidades?.[0] || "";
+        if (!indicador || todasAssociadas) {
+            select.value = "__todas__";
+        } else if (localidadesAssociadas.length > 1) {
+            select.value = "__associadas__";
+        } else if (localidades.some(item => item.nome_localidade === unicaAssociada)) {
+            select.value = unicaAssociada;
+        } else {
+            select.value = "__todas__";
+        }
         el("management-form-new-locality").value = "";
         atualizarCampoNovaLocalidade();
     }
@@ -384,10 +405,6 @@
         const pilarNome = normalizar(el("management-form-pillar").value) || "Manual";
         const grupoNome = normalizar(el("management-form-group").value) || "Manual";
         const localSelecionada = el("management-form-locality").value;
-        const localNome = localSelecionada === "__nova__"
-            ? normalizar(el("management-form-new-locality").value)
-            : normalizar(localSelecionada);
-        if (!localNome) throw new Error("Informe o nome da nova localidade.");
         const tipo = eAcidente(nome) ? "numero" : el("management-form-type").value;
         const metodo = eAcidente(nome) ? "soma" : el("management-form-method").value;
         const cliente = (await listarContratos()).find(c => c.nome_cliente === contratoSelecionado);
@@ -395,7 +412,21 @@
         const pilar = await garantirEntidade("pilares", { nome_pilar: pilarNome }, "nome_pilar", "id,nome_pilar");
         const grupo = await garantirEntidade("grupos", { nome_grupo: grupoNome, pilar_id: pilar.id }, "nome_grupo,pilar_id", "id,nome_grupo,pilar_id");
         const indicador = await garantirEntidade("indicadores", { nome_indicador: nome, grupo_id: grupo.id }, "nome_indicador,grupo_id", "id,nome_indicador,grupo_id");
-        const local = await garantirEntidade("localidades", { nome_localidade: localNome, cliente_id: cliente.id }, "nome_localidade,cliente_id", "id,nome_localidade,cliente_id");
+        let locais = [];
+        if (localSelecionada === "__todas__") {
+            locais = [...(dadosContrato?.localidades || [])];
+        } else if (localSelecionada === "__associadas__") {
+            const anterior = dadosContrato.indicadores.find(i => i.nome_indicador === original);
+            locais = (dadosContrato?.localidades || []).filter(local => anterior?.localidadeIds?.includes(local.id));
+        } else {
+            const localNome = localSelecionada === "__nova__"
+                ? normalizar(el("management-form-new-locality").value)
+                : normalizar(localSelecionada);
+            if (!localNome) throw new Error("Informe o nome da nova localidade.");
+            const local = await garantirEntidade("localidades", { nome_localidade: localNome, cliente_id: cliente.id }, "nome_localidade,cliente_id", "id,nome_localidade,cliente_id");
+            locais = [local];
+        }
+        if (locais.length === 0) throw new Error("Este contrato ainda não possui localidades. Inclua uma nova localidade.");
 
         if (kind === "edit-indicator" && original) {
             const antigo = dadosContrato.indicadores.find(i => i.nome_indicador === original);
@@ -409,11 +440,12 @@
         }
         if (kind === "new-indicator") {
             const ano = appState()?.anoAtual || new Date().getFullYear();
-            const { error } = await supabase().from("indicadores_competencia").upsert({
+            const fatosIniciais = locais.map(local => ({
                 localidade_id: local.id, cliente_id: cliente.id, indicador_id: indicador.id,
                 competencia: `01/${ano}`, meta: normalizar(el("management-form-meta").value),
                 formula_calculo: normalizar(el("management-form-formula").value), dados_base: ""
-            }, { onConflict: "localidade_id,cliente_id,indicador_id,competencia" });
+            }));
+            const { error } = await supabase().from("indicadores_competencia").upsert(fatosIniciais, { onConflict: "localidade_id,cliente_id,indicador_id,competencia" });
             if (error) throw new Error(error.message);
         } else {
             const { error } = await supabase().from("indicadores_competencia").update({
@@ -422,13 +454,15 @@
             if (error) throw new Error(error.message);
 
             const indicadorAnterior = dadosContrato.indicadores.find(i => i.nome_indicador === original);
-            if (!indicadorAnterior?.localidadeIds?.includes(local.id)) {
+            const locaisNovos = locais.filter(local => !indicadorAnterior?.localidadeIds?.includes(local.id));
+            if (locaisNovos.length > 0) {
                 const ano = appState()?.anoAtual || new Date().getFullYear();
-                const { error: associacaoError } = await supabase().from("indicadores_competencia").upsert({
+                const novasAssociacoes = locaisNovos.map(local => ({
                     localidade_id: local.id, cliente_id: cliente.id, indicador_id: indicador.id,
                     competencia: `01/${ano}`, meta: normalizar(el("management-form-meta").value),
                     formula_calculo: normalizar(el("management-form-formula").value), dados_base: ""
-                }, { onConflict: "localidade_id,cliente_id,indicador_id,competencia" });
+                }));
+                const { error: associacaoError } = await supabase().from("indicadores_competencia").upsert(novasAssociacoes, { onConflict: "localidade_id,cliente_id,indicador_id,competencia" });
                 if (associacaoError) throw new Error(associacaoError.message);
             }
         }
