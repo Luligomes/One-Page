@@ -1,0 +1,45 @@
+.data-extraction-modal[hidden] { display: none !important; }
+.data-extraction-modal { position: fixed; inset: 0; z-index: 21000; padding: 22px; background: rgba(7, 26, 58, .74); color: #132f57; font-family: Inter, sans-serif; }
+.data-extraction-shell { width: min(1500px, 100%); height: min(920px, 100%); margin: auto; display: flex; flex-direction: column; overflow: hidden; border-radius: 18px; background: #f5f7fb; box-shadow: 0 30px 80px rgba(7, 26, 58, .34); }
+.data-extraction-header { padding: 22px 26px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; color: white; background: linear-gradient(115deg, #0f2b5c, #183d76); }
+.data-extraction-header h2 { margin: 3px 0 4px; font-family: Outfit, sans-serif; font-size: 27px; }
+.data-extraction-header p { margin: 0; color: #dbe7f7; font-size: 14px; }
+.data-extraction-kicker { color: #19c89b; font-size: 11px; font-weight: 800; letter-spacing: .13em; }
+.data-extraction-header-actions { display: flex; align-items: center; gap: 10px; }
+.data-extraction-primary { min-height: 42px; padding: 0 18px; border: 0; border-radius: 8px; background: #0aaa80; color: white; font: inherit; font-weight: 750; cursor: pointer; }
+.data-extraction-primary:disabled { cursor: wait; opacity: .55; }
+.data-extraction-close { border: 0; background: transparent; color: white; font-size: 31px; line-height: 1; cursor: pointer; }
+.data-extraction-filters { padding: 16px 22px; display: grid; grid-template-columns: 1.15fr 1.15fr .8fr 1.4fr; gap: 12px; background: white; border-bottom: 1px solid #dfe6ef; }
+.data-extraction-filters > div { display: flex; flex-direction: column; gap: 6px; }
+.data-extraction-filters label { color: #53657d; font-size: 13px; font-weight: 700; }
+.data-extraction-filters select, .data-extraction-filters input { min-height: 42px; width: 100%; box-sizing: border-box; border: 1px solid #cad6e5; border-radius: 8px; background: white; color: #17345f; padding: 0 11px; font: inherit; }
+.data-extraction-summary { min-height: 46px; padding: 8px 22px; display: flex; align-items: center; gap: 18px; color: #64768c; font-size: 13px; }
+.data-extraction-summary strong { color: #17345f; }
+#data-extraction-status { margin-left: auto; padding: 6px 9px; border-radius: 7px; background: #e9f9f4; color: #128567; font-weight: 700; }
+#data-extraction-status:empty { display: none; }
+#data-extraction-status.error { background: #fff0f2; color: #b63c4d; }
+.data-extraction-table-wrap { min-height: 0; flex: 1; overflow: auto; margin: 0 22px; border: 1px solid #dbe4ee; border-radius: 12px; background: white; }
+.data-extraction-table { width: 100%; min-width: 1030px; border-collapse: collapse; font-size: 13px; }
+.data-extraction-table thead { position: sticky; top: 0; z-index: 1; }
+.data-extraction-table th { padding: 12px; background: #eaf0f7; color: #52657d; text-align: left; white-space: nowrap; }
+.data-extraction-table td { padding: 11px 12px; border-top: 1px solid #e3eaf2; color: #263e60; }
+.data-extraction-table td.contract { font-weight: 750; color: #17345f; }
+.data-extraction-table td.number, .data-extraction-table th:nth-last-child(-n+3) { text-align: right; }
+.data-extraction-empty { padding: 40px; text-align: center; color: #74849a; }
+.data-extraction-empty[hidden] { display: none; }
+.data-extraction-footer { min-height: 62px; padding: 10px 22px; display: flex; justify-content: center; align-items: center; gap: 14px; background: white; border-top: 1px solid #dfe6ef; color: #64768c; font-size: 13px; }
+.data-extraction-footer button { min-height: 38px; padding: 0 13px; border: 1px solid #cbd6e4; border-radius: 8px; background: white; color: #17345f; font-weight: 700; cursor: pointer; }
+.data-extraction-footer button:disabled { cursor: not-allowed; opacity: .45; }
+@media (max-width: 850px) {
+    .data-extraction-modal { padding: 0; }
+    .data-extraction-shell { height: 100%; border-radius: 0; }
+    .data-extraction-header { align-items: flex-start; }
+    .data-extraction-filters { grid-template-columns: 1fr 1fr; }
+    .data-extraction-summary { flex-wrap: wrap; }
+    #data-extraction-status { margin-left: 0; }
+}
+@media (max-width: 560px) {
+    .data-extraction-header { flex-direction: column; }
+    .data-extraction-filters { grid-template-columns: 1fr; }
+    .data-extraction-table-wrap { margin: 0 12px; }
+}

@@ -17,6 +17,7 @@
     <!-- CSS Customizado -->
     <link rel="stylesheet" href="styles.css?v=20261123-multi-localidade-1">
     <link rel="stylesheet" href="management.css?v=20261125-todas-localidades-2">
+    <link rel="stylesheet" href="extraction.css?v=20261125-csv-1">
     
     <!-- Bibliotecas Externas via CDN -->
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -37,6 +38,10 @@
                 <h1 class="header-title">Boletim Clientes <span class="badge-version">v2.0</span></h1>
             </div>
             <div class="header-right">
+                <button id="btn-open-data-table" class="btn btn-secondary">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"></path><path d="M3 9h18M3 15h18M9 3v18"></path></svg>
+                    <span>Tabela de dados</span>
+                </button>
                 <button id="btn-toggle-dashboard" class="btn btn-secondary active">
                     <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
                     <span>Painel de Controle</span>
@@ -822,6 +827,7 @@
     <script src="acumulado2025.js?v=20261123-multi-localidade-1"></script>
     <script src="app.js?v=20261124-gestao-1"></script>
     <script src="management.js?v=20261125-todas-localidades-2"></script>
+    <script src="extraction.js?v=20261125-csv-1"></script>
 
 <!-- Modal de Prévia de Importação -->
 <div class="modal-overlay" id="import-preview-modal" role="dialog" aria-modal="true" aria-labelledby="import-preview-title" aria-hidden="true" style="display: none;">
